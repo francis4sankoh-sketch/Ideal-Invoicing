@@ -7,9 +7,9 @@ import { Input, Select } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
-import { Invoice, Customer, BusinessSettings, PaymentRecord, PAYMENT_METHODS } from '@/types';
+import { Invoice, Customer, BusinessSettings, Expense, PaymentRecord, PAYMENT_METHODS } from '@/types';
 import { formatCurrency, formatDateAU, formatDateDocument } from '@/lib/utils/format';
-import { ArrowLeft, Send, Bell, DollarSign, Ban, Copy } from 'lucide-react';
+import { ArrowLeft, Send, Bell, DollarSign, Ban, Copy, TrendingUp, TrendingDown, Receipt, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { PDFDownloadButton } from '@/components/pdf-download-button';
 
@@ -26,6 +26,8 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [sendModalOpen, setSendModalOpen] = useState(false);
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
+
+  const [expenses, setExpenses] = useState<Expense[]>([]);
 
   const [payment, setPayment] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -46,8 +48,12 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       setInvoice(invRes.data);
       setPayment((p) => ({ ...p, amount: invRes.data.balance_due }));
 
-      const { data: cust } = await supabase.from('customers').select('*').eq('id', invRes.data.customer_id).single();
-      if (cust) setCustomer(cust);
+      const [custRes, expensesRes] = await Promise.all([
+        supabase.from('customers').select('*').eq('id', invRes.data.customer_id).single(),
+        supabase.from('expenses').select('*').eq('invoice_id', id).order('date', { ascending: false }),
+      ]);
+      if (custRes.data) setCustomer(custRes.data);
+      setExpenses(expensesRes.data || []);
     }
     if (settingsRes.data) setSettings(settingsRes.data);
     setLoading(false);
@@ -399,6 +405,94 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           )}
         </CardContent>
       </Card>
+
+      {/* Event Profit & Expenses */}
+      {(() => {
+        const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+        const revenue = invoice.amount_paid;
+        const profit = revenue - totalExpenses;
+        const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+
+        return (
+          <Card>
+            <div className="px-6 py-4 border-b border-[var(--color-border)] flex items-center justify-between">
+              <h3 className="font-bold text-[var(--color-text)]" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
+                Event Profitability
+              </h3>
+              <Link href={`/expenses`}>
+                <Button variant="outline" size="sm">
+                  <Plus className="w-3.5 h-3.5" /> Add Expense
+                </Button>
+              </Link>
+            </div>
+            <CardContent className="py-4">
+              {/* Profit Summary Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                <div className="text-center p-3 rounded-lg bg-[var(--color-bg-light)]">
+                  <p className="text-xs text-[var(--color-text-muted)]">Invoice Total</p>
+                  <p className="text-lg font-bold">{formatCurrency(invoice.total)}</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-green-50 dark:bg-green-900/20">
+                  <p className="text-xs text-[var(--color-text-muted)]">Revenue (Paid)</p>
+                  <p className="text-lg font-bold text-green-600">{formatCurrency(revenue)}</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-red-50 dark:bg-red-900/20">
+                  <p className="text-xs text-[var(--color-text-muted)]">Total Expenses</p>
+                  <p className="text-lg font-bold text-red-600">{formatCurrency(totalExpenses)}</p>
+                </div>
+                <div className={`text-center p-3 rounded-lg ${profit >= 0 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
+                  <p className="text-xs text-[var(--color-text-muted)]">Profit</p>
+                  <div className="flex items-center justify-center gap-1">
+                    {profit >= 0 ? <TrendingUp className="w-4 h-4 text-green-600" /> : <TrendingDown className="w-4 h-4 text-red-600" />}
+                    <p className={`text-lg font-bold ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {formatCurrency(Math.abs(profit))}
+                    </p>
+                  </div>
+                  {revenue > 0 && (
+                    <p className={`text-xs ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                      {margin.toFixed(1)}% margin
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Expense List */}
+              {expenses.length === 0 ? (
+                <div className="text-center py-6 text-sm text-[var(--color-text-muted)]">
+                  <Receipt className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                  <p>No expenses linked to this event yet.</p>
+                  <p className="text-xs mt-1">Go to Expenses and link them to this invoice.</p>
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[var(--color-border)]">
+                      <th className="py-2 text-left font-medium text-[var(--color-text-muted)]">Date</th>
+                      <th className="py-2 text-left font-medium text-[var(--color-text-muted)]">Description</th>
+                      <th className="py-2 text-left font-medium text-[var(--color-text-muted)]">Category</th>
+                      <th className="py-2 text-right font-medium text-[var(--color-text-muted)]">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expenses.map((e) => (
+                      <tr key={e.id} className="border-b border-[var(--color-border)]">
+                        <td className="py-2">{formatDateAU(e.date)}</td>
+                        <td className="py-2 font-medium">{e.description}</td>
+                        <td className="py-2 capitalize text-[var(--color-text-muted)]">{e.category}</td>
+                        <td className="py-2 text-right font-medium text-red-600">{formatCurrency(e.amount)}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td colSpan={3} className="py-2 text-right font-bold">Total Expenses</td>
+                      <td className="py-2 text-right font-bold text-red-600">{formatCurrency(totalExpenses)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
         <div className="flex justify-end">
