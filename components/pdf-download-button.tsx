@@ -13,7 +13,7 @@ interface PDFDownloadButtonProps {
   data: Quote | Invoice;
   customer?: Customer | null;
   settings: BusinessSettings;
-  variant?: 'default' | 'outline';
+  variant?: 'primary' | 'outline';
   size?: 'sm' | 'md';
 }
 
