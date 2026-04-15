@@ -12,7 +12,7 @@ import { Quote, Customer, LineItem, BusinessSettings, Product, QuoteMessage } fr
 import { formatCurrency, formatDateAU, generateId } from '@/lib/utils/format';
 import {
   ArrowLeft, Plus, Trash2, Save, Send, FileDown, Copy, ArrowRightLeft,
-  MessageCircle, ChevronDown, ChevronUp, Upload, Package
+  MessageCircle, ChevronDown, ChevronUp, Upload, Package, CheckCircle2, CopyPlus
 } from 'lucide-react';
 import Link from 'next/link';
 import { PDFDownloadButton } from '@/components/pdf-download-button';
@@ -246,6 +246,98 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
     setSaving(false);
   };
 
+  const handleAccept = async () => {
+    if (!quote || isNew) return;
+    if (!confirm(`Mark quote ${quote.quote_number} as accepted?`)) return;
+    setSaving(true);
+    const { error } = await supabase
+      .from('quotes')
+      .update({ status: 'accepted' })
+      .eq('id', quote.id);
+    setSaving(false);
+    if (error) {
+      alert(`Failed to accept quote: ${error.message}`);
+      return;
+    }
+    setQuote({ ...quote, status: 'accepted' });
+  };
+
+  const handleDuplicate = async () => {
+    if (!quote || isNew || !settings) return;
+    setSaving(true);
+
+    const quoteNumber = `${settings.quote_prefix}-${settings.next_quote_number}`;
+    const validUntil = new Date();
+    validUntil.setDate(validUntil.getDate() + (settings.default_quote_validity || 30));
+
+    const freshLineItems: LineItem[] = (quote.line_items || []).map((item) => ({
+      ...item,
+      id: generateId(),
+    }));
+
+    const payload = {
+      quote_number: quoteNumber,
+      customer_id: quote.customer_id,
+      title: `${quote.title} (Copy)`,
+      event_date: quote.event_date,
+      event_location: quote.event_location,
+      line_items: freshLineItems,
+      subtotal: quote.subtotal,
+      discount_type: quote.discount_type,
+      discount_value: quote.discount_value,
+      discount_amount: quote.discount_amount,
+      include_gst: quote.include_gst,
+      gst_amount: quote.gst_amount,
+      total: quote.total,
+      deposit_percentage: quote.deposit_percentage,
+      deposit_amount: quote.deposit_amount,
+      status: 'draft' as const,
+      valid_until: validUntil.toISOString().split('T')[0],
+      notes: quote.notes,
+      terms: quote.terms,
+      converted_to_invoice: false,
+      invoice_id: null,
+    };
+
+    const { data: created, error } = await supabase
+      .from('quotes')
+      .insert(payload)
+      .select()
+      .single();
+
+    if (error) {
+      setSaving(false);
+      alert(`Failed to duplicate quote: ${error.message}`);
+      return;
+    }
+
+    await supabase
+      .from('business_settings')
+      .update({ next_quote_number: settings.next_quote_number + 1 })
+      .eq('id', settings.id);
+
+    setSaving(false);
+    if (created) router.push(`/quotes/${created.id}`);
+  };
+
+  const handleDelete = async () => {
+    if (!quote || isNew) return;
+    if (quote.converted_to_invoice) {
+      alert('This quote has been converted to an invoice and cannot be deleted. Delete the invoice first.');
+      return;
+    }
+    if (!confirm(`Delete quote ${quote.quote_number}? This cannot be undone.`)) return;
+    setSaving(true);
+    await supabase.from('quote_messages').delete().eq('quote_id', quote.id);
+    const { error } = await supabase.from('quotes').delete().eq('id', quote.id);
+    setSaving(false);
+    if (error) {
+      alert(`Failed to delete quote: ${error.message}`);
+      return;
+    }
+    router.push('/quotes');
+  };
+
   const handleConvertToInvoice = async () => {
     if (!quote || !settings) return;
     setSaving(true);
@@ -360,6 +452,19 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
               </Button>
               {settings && (
                 <PDFDownloadButton type="quote" data={quote} customer={selectedCustomer} settings={settings} />
+              )}
+              <Button variant="outline" size="sm" onClick={handleDuplicate} loading={saving}>
+                <CopyPlus className="w-3.5 h-3.5" /> Duplicate
+              </Button>
+              {(quote.status === 'draft' || quote.status === 'sent') && (
+                <Button variant="outline" size="sm" onClick={handleAccept} loading={saving}>
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Accept
+                </Button>
+              )}
+              {!quote.converted_to_invoice && (
+                <Button variant="danger" size="sm" onClick={handleDelete} loading={saving}>
+                  <Trash2 className="w-3.5 h-3.5" /> Delete
+                </Button>
               )}
               {quote.status === 'accepted' && !quote.converted_to_invoice && (
                 <Button size="sm" onClick={handleConvertToInvoice} loading={saving}>

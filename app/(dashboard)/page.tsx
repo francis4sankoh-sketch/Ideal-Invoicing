@@ -21,6 +21,7 @@ import {
   MapPin,
 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 interface DashboardStats {
   monthlyRevenue: number;
@@ -89,6 +90,7 @@ export default function DashboardPage() {
   const [overdueInvoices, setOverdueInvoices] = useState<OverdueInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const supabase = createClient();
+  const router = useRouter();
 
   useEffect(() => {
     loadDashboard();
@@ -514,22 +516,24 @@ export default function DashboardPage() {
                 </thead>
                 <tbody>
                   {eventProfits.map((ep) => (
-                    <Link key={ep.id} href={`/invoices/${ep.id}`} className="contents">
-                      <tr className="border-b border-[var(--color-border)] hover:bg-[var(--color-bg-light)] cursor-pointer transition-colors">
-                        <td className="px-6 py-3">
-                          <p className="font-medium">{ep.invoice_number}</p>
-                          <p className="text-xs text-[var(--color-text-muted)]">{ep.title}</p>
-                        </td>
-                        <td className="px-4 py-3 text-[var(--color-text-muted)]">{ep.customer_name}</td>
-                        <td className="px-4 py-3 text-[var(--color-text-muted)]">{ep.event_date ? formatDateAU(ep.event_date) : '—'}</td>
-                        <td className="px-4 py-3 text-right">{formatCurrency(ep.total)}</td>
-                        <td className="px-4 py-3 text-right text-green-600">{formatCurrency(ep.amount_paid)}</td>
-                        <td className="px-4 py-3 text-right text-red-600">{ep.expenses > 0 ? formatCurrency(ep.expenses) : '—'}</td>
-                        <td className={`px-4 py-3 text-right font-bold ${ep.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {formatCurrency(ep.profit)}
-                        </td>
-                      </tr>
-                    </Link>
+                    <tr
+                      key={ep.id}
+                      onClick={() => router.push(`/invoices/${ep.id}`)}
+                      className="border-b border-[var(--color-border)] hover:bg-[var(--color-bg-light)] cursor-pointer transition-colors"
+                    >
+                      <td className="px-6 py-3">
+                        <p className="font-medium">{ep.invoice_number}</p>
+                        <p className="text-xs text-[var(--color-text-muted)]">{ep.title}</p>
+                      </td>
+                      <td className="px-4 py-3 text-[var(--color-text-muted)]">{ep.customer_name}</td>
+                      <td className="px-4 py-3 text-[var(--color-text-muted)]">{ep.event_date ? formatDateAU(ep.event_date) : '—'}</td>
+                      <td className="px-4 py-3 text-right">{formatCurrency(ep.total)}</td>
+                      <td className="px-4 py-3 text-right text-green-600">{formatCurrency(ep.amount_paid)}</td>
+                      <td className="px-4 py-3 text-right text-red-600">{ep.expenses > 0 ? formatCurrency(ep.expenses) : '—'}</td>
+                      <td className={`px-4 py-3 text-right font-bold ${ep.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {formatCurrency(ep.profit)}
+                      </td>
+                    </tr>
                   ))}
                 </tbody>
               </table>

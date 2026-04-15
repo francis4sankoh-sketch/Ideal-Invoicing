@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Invoice, Customer } from '@/types';
 import { formatCurrency, formatDateAU } from '@/lib/utils/format';
-import { Receipt, Search } from 'lucide-react';
+import { Receipt, Search, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 
 const STATUSES = ['all', 'unpaid', 'partially_paid', 'paid', 'overdue', 'cancelled'];
@@ -18,7 +18,33 @@ export default function InvoicesPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const supabase = createClient();
+
+  const handleDelete = async (inv: Invoice & { customer?: Customer }) => {
+    if (inv.amount_paid > 0) {
+      alert('This invoice already has payments recorded and cannot be deleted. Cancel it instead.');
+      return;
+    }
+    if (!confirm(`Delete invoice ${inv.invoice_number}? This cannot be undone.`)) return;
+    setBusyId(inv.id);
+    // Unlink source quote so it becomes deletable again
+    if (inv.quote_id) {
+      await supabase
+        .from('quotes')
+        .update({ converted_to_invoice: false, invoice_id: null })
+        .eq('id', inv.quote_id);
+    }
+    // Unlink any expenses pointing at this invoice
+    await supabase.from('expenses').update({ invoice_id: null }).eq('invoice_id', inv.id);
+    const { error } = await supabase.from('invoices').delete().eq('id', inv.id);
+    setBusyId(null);
+    if (error) {
+      alert(`Failed to delete invoice: ${error.message}`);
+      return;
+    }
+    setInvoices((prev) => prev.filter((x) => x.id !== inv.id));
+  };
 
   useEffect(() => { loadInvoices(); }, []);
 
@@ -105,6 +131,7 @@ export default function InvoicesPage() {
                   <th className="px-4 py-3 font-medium text-[var(--color-text-muted)] text-right">Balance</th>
                   <th className="px-4 py-3 font-medium text-[var(--color-text-muted)]">Due Date</th>
                   <th className="px-4 py-3 font-medium text-[var(--color-text-muted)]">Status</th>
+                  <th className="px-4 py-3 font-medium text-[var(--color-text-muted)] text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -128,6 +155,16 @@ export default function InvoicesPage() {
                     <td className="px-4 py-3 text-right font-medium text-red-600">{formatCurrency(inv.balance_due)}</td>
                     <td className="px-4 py-3 text-[var(--color-text-muted)]">{inv.due_date ? formatDateAU(inv.due_date) : '—'}</td>
                     <td className="px-4 py-3"><Badge status={inv.status} /></td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => handleDelete(inv)}
+                        disabled={busyId === inv.id || inv.amount_paid > 0}
+                        title={inv.amount_paid > 0 ? 'Has payments — cancel instead' : 'Delete invoice'}
+                        className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-[var(--color-text-muted)] hover:text-red-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

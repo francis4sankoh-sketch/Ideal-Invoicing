@@ -9,13 +9,15 @@ import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
 import { Invoice, Customer, BusinessSettings, Expense, PaymentRecord, PAYMENT_METHODS } from '@/types';
 import { formatCurrency, formatDateAU, formatDateDocument } from '@/lib/utils/format';
-import { ArrowLeft, Send, Bell, DollarSign, Ban, Copy, TrendingUp, TrendingDown, Receipt, Plus } from 'lucide-react';
+import { ArrowLeft, Send, Bell, DollarSign, Ban, Copy, TrendingUp, TrendingDown, Receipt, Plus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { PDFDownloadButton } from '@/components/pdf-download-button';
 
 export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const supabase = createClient();
+  const router = useRouter();
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -187,6 +189,30 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     if (!invoice || !confirm('Are you sure you want to cancel this invoice?')) return;
     await supabase.from('invoices').update({ status: 'cancelled' }).eq('id', invoice.id);
     setInvoice({ ...invoice, status: 'cancelled' });
+  };
+
+  const handleDelete = async () => {
+    if (!invoice) return;
+    if (invoice.amount_paid > 0) {
+      alert('This invoice already has payments recorded and cannot be deleted. Cancel it instead.');
+      return;
+    }
+    if (!confirm(`Delete invoice ${invoice.invoice_number}? This cannot be undone.`)) return;
+    setSaving(true);
+    if (invoice.quote_id) {
+      await supabase
+        .from('quotes')
+        .update({ converted_to_invoice: false, invoice_id: null })
+        .eq('id', invoice.quote_id);
+    }
+    await supabase.from('expenses').update({ invoice_id: null }).eq('invoice_id', invoice.id);
+    const { error } = await supabase.from('invoices').delete().eq('id', invoice.id);
+    setSaving(false);
+    if (error) {
+      alert(`Failed to delete invoice: ${error.message}`);
+      return;
+    }
+    router.push('/invoices');
   };
 
   const copyPortalLink = () => {
@@ -494,13 +520,18 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         );
       })()}
 
-      {invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
-        <div className="flex justify-end">
-          <Button variant="danger" size="sm" onClick={handleCancel}>
+      <div className="flex justify-end gap-2">
+        {invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
+          <Button variant="outline" size="sm" onClick={handleCancel}>
             <Ban className="w-3.5 h-3.5" /> Cancel Invoice
           </Button>
-        </div>
-      )}
+        )}
+        {invoice.amount_paid === 0 && (
+          <Button variant="danger" size="sm" onClick={handleDelete} loading={saving}>
+            <Trash2 className="w-3.5 h-3.5" /> Delete Invoice
+          </Button>
+        )}
+      </div>
 
       {/* Record Payment Modal */}
       <Modal open={paymentModalOpen} onClose={() => setPaymentModalOpen(false)} title="Record Payment">
