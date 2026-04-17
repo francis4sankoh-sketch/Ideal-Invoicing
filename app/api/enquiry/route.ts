@@ -3,9 +3,10 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { sendNewEnquiryNotification } from '@/lib/resend/emails';
 import { randomUUID } from 'crypto';
 
-type SelectedItem = {
-  // Flexible shape — support both the new website ({product_id, product_name, quantity})
-  // and the Base44 legacy shape ({equipment_id, equipment_name, quantity}).
+type SelectedItemObj = {
+  // Supports the new website ({product_id, product_name, quantity}),
+  // the Base44 legacy shape ({equipment_id, equipment_name, quantity}),
+  // and a generic {name, quantity} shape.
   product_id?: string;
   product_name?: string;
   equipment_id?: string;
@@ -15,26 +16,78 @@ type SelectedItem = {
   notes?: string;
 };
 
+// The website currently sends either objects (above) or strings like "Peacock Chair (x1)".
+type SelectedItem = SelectedItemObj | string;
+
+type ProductRow = {
+  id: string;
+  name: string;
+  default_price: number;
+  description: string | null;
+  photos: string[] | null;
+};
+
+/**
+ * Parse a string item like "Peacock Chair (x2)" into { name, quantity }.
+ * Falls back to quantity=1 when no (xN) suffix is present.
+ */
+function parseStringItem(s: string): { name: string; quantity: number } {
+  const match = s.match(/^(.*?)\s*\(x\s*(\d+)\s*\)\s*$/i);
+  if (match) {
+    return { name: match[1].trim(), quantity: Number(match[2]) || 1 };
+  }
+  return { name: s.trim(), quantity: 1 };
+}
+
+/**
+ * Normalise any incoming selected_items entry to { name, quantity, notes? }.
+ * Handles:
+ *  - object forms ({product_name, equipment_name, name}) with quantity
+ *  - string forms ("Peacock Chair (x1)")
+ *  - comma-separated string forms ("Chairs (x1), Tables (x2)") — split into multiple
+ */
+function normaliseItems(raw: SelectedItem[] | undefined): Array<{ name: string; quantity: number; notes?: string }> {
+  if (!raw) return [];
+  const out: Array<{ name: string; quantity: number; notes?: string }> = [];
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      // If the string contains commas and multiple "(xN)" markers, split it
+      const parts = item.includes(',') && /\(x\s*\d+\s*\)/i.test(item)
+        ? item.split(/,\s*(?=[^,]*\(x\s*\d+\s*\))/i)
+        : [item];
+      for (const part of parts) {
+        const parsed = parseStringItem(part);
+        if (parsed.name) out.push(parsed);
+      }
+    } else if (item && typeof item === 'object') {
+      const name = item.product_name || item.equipment_name || item.name || '';
+      const quantity = Number(item.quantity ?? 1) || 1;
+      if (name) out.push({ name, quantity, notes: item.notes });
+    }
+  }
+  return out;
+}
+
 /**
  * Try to match a requested item (by name) against an actual product row.
  * Falls back to fuzzy "contains" and token overlap if exact match fails.
  */
 function matchProduct(
   requestedName: string | undefined,
-  products: Array<{ id: string; name: string; default_price: number; description: string | null; photos: string[] | null }>
-) {
+  products: ProductRow[]
+): ProductRow | null {
   if (!requestedName) return null;
   const target = requestedName.toLowerCase().trim();
 
   // Exact match
-  let match = products.find((p) => p.name.toLowerCase().trim() === target);
-  if (match) return match;
+  const exact = products.find((p) => p.name.toLowerCase().trim() === target);
+  if (exact) return exact;
 
   // Target contains product name, or product name contains target
-  match = products.find(
+  const contained = products.find(
     (p) => target.includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(target)
   );
-  if (match) return match;
+  if (contained) return contained;
 
   // Token overlap — ignore short/common words
   const stop = new Set(['the', 'a', 'and', 'or', 'of', 'with', 'for', '&']);
@@ -42,7 +95,7 @@ function matchProduct(
   if (targetTokens.length === 0) return null;
 
   let bestScore = 0;
-  let best: typeof match = null;
+  let best: ProductRow | null = null;
   for (const p of products) {
     const nameTokens = p.name.toLowerCase().split(/\s+/).filter((t) => t.length > 2 && !stop.has(t));
     const score = nameTokens.filter((t) => targetTokens.includes(t)).length;
@@ -161,17 +214,16 @@ export async function POST(request: NextRequest) {
         const validUntil = new Date();
         validUntil.setDate(validUntil.getDate() + (settings.default_quote_validity || 30));
 
-        const lineItems = (selected_items || []).map((item) => {
-          const reqName = item.product_name || item.equipment_name || item.name || '';
-          const qty = Number(item.quantity ?? 1) || 1;
-          const product = matchProduct(reqName, products || []);
+        const normalisedItems = normaliseItems(selected_items);
+        const lineItems = normalisedItems.map((item) => {
+          const product = matchProduct(item.name, products || []);
           const unitPrice = product?.default_price ?? 0;
           return {
             id: randomUUID(),
-            description: reqName || product?.name || '',
-            quantity: qty,
+            description: item.name || product?.name || '',
+            quantity: item.quantity,
             unit_price: unitPrice,
-            total: unitPrice * qty,
+            total: unitPrice * item.quantity,
             notes: item.notes || product?.description || '',
             photos: product?.photos || [],
           };
@@ -252,7 +304,10 @@ export async function POST(request: NextRequest) {
         email,
         event_type,
         event_date,
-        selected_items,
+        selected_items: normaliseItems(selected_items).map((i) => ({
+          product_name: i.name,
+          quantity: i.quantity,
+        })),
       });
     } catch (emailErr) {
       console.error('Failed to send notification email:', emailErr);
