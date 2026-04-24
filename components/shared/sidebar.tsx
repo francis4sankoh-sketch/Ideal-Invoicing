@@ -14,11 +14,13 @@ import {
   ShoppingCart,
   Settings,
   LogOut,
+  Mail,
   X,
 } from 'lucide-react';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/enquiries', label: 'Enquiries', icon: Mail },
   { href: '/customers', label: 'Customers', icon: Users },
   { href: '/quotes', label: 'Quotes', icon: FileText },
   { href: '/invoices', label: 'Invoices', icon: Receipt },

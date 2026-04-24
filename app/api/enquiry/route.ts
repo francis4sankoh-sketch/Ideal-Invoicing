@@ -123,6 +123,8 @@ export async function POST(request: NextRequest) {
       event_date,
       event_location,
       guest_count,
+      budget_range,
+      venue_access,
       selected_items,
       additional_notes,
     } = body as {
@@ -132,10 +134,21 @@ export async function POST(request: NextRequest) {
       event_type?: string;
       event_date?: string;
       event_location?: string;
-      guest_count?: number;
+      // Qualification fields — all optional strings from the website form
+      guest_count?: string | number; // accept either for back-compat
+      budget_range?: string;
+      venue_access?: string;
       selected_items?: SelectedItem[];
       additional_notes?: string;
     };
+
+    // Normalise guest_count to string (website now sends ranges like "30-60")
+    const guestCountStr =
+      guest_count === undefined || guest_count === null || guest_count === ''
+        ? null
+        : String(guest_count);
+    const budgetRangeStr = budget_range?.trim() || null;
+    const venueAccessStr = venue_access?.trim() || null;
 
     if (!name || !email) {
       return Response.json({ error: 'Name and email are required' }, { status: 400 });
@@ -183,7 +196,9 @@ export async function POST(request: NextRequest) {
         event_type: event_type || null,
         event_date: event_date || null,
         event_location: event_location || null,
-        guest_count: guest_count || null,
+        guest_count: guestCountStr,
+        budget_range: budgetRangeStr,
+        venue_access: venueAccessStr,
         selected_items: selected_items || [],
         additional_notes: additional_notes || null,
         source: 'website',
@@ -242,6 +257,13 @@ export async function POST(request: NextRequest) {
         const noteLines = ['Auto-created from website enquiry.'];
         if (unmatchedCount > 0) {
           noteLines.push(`${unmatchedCount} item(s) could not be matched to a product — review pricing before sending.`);
+        }
+        const qualifyingLines: string[] = [];
+        if (guestCountStr) qualifyingLines.push(`Guest count: ${guestCountStr}`);
+        if (budgetRangeStr) qualifyingLines.push(`Budget: ${budgetRangeStr}`);
+        if (venueAccessStr) qualifyingLines.push(`Venue access: ${venueAccessStr}`);
+        if (qualifyingLines.length > 0) {
+          noteLines.push('', 'Qualification:', ...qualifyingLines);
         }
         if (additional_notes) {
           noteLines.push('', 'Customer notes:', additional_notes);
@@ -304,6 +326,11 @@ export async function POST(request: NextRequest) {
         email,
         event_type,
         event_date,
+        event_location,
+        guest_count: guestCountStr,
+        budget_range: budgetRangeStr,
+        venue_access: venueAccessStr,
+        additional_notes,
         selected_items: normaliseItems(selected_items).map((i) => ({
           product_name: i.name,
           quantity: i.quantity,

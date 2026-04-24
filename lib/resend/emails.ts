@@ -77,11 +77,20 @@ function emailWrapper(content: string): string {
 export async function sendNewEnquiryNotification(enquiry: {
   name: string;
   email: string;
-  event_type?: string;
-  event_date?: string;
+  event_type?: string | null;
+  event_date?: string | null;
+  event_location?: string | null;
+  guest_count?: string | null;
+  budget_range?: string | null;
+  venue_access?: string | null;
+  additional_notes?: string | null;
   selected_items?: Array<{ product_name: string; quantity: number }>;
 }) {
   const itemsList = enquiry.selected_items?.map(i => `<li>${i.product_name} x ${i.quantity}</li>`).join('') || '<li>None specified</li>';
+  const row = (label: string, value: string | null | undefined) =>
+    value
+      ? `<div class="detail-row"><span class="detail-label">${label}:</span> <span class="detail-value">${value}</span></div>`
+      : '';
 
   return sendEmail({
     to: BUSINESS_EMAILS,
@@ -92,14 +101,19 @@ export async function sendNewEnquiryNotification(enquiry: {
         <p><strong>${enquiry.name}</strong> has submitted a quote request.</p>
       </div>
       <div style="margin-top: 16px;">
-        <div class="detail-row"><span class="detail-label">Email:</span> <span class="detail-value">${enquiry.email}</span></div>
-        ${enquiry.event_type ? `<div class="detail-row"><span class="detail-label">Event Type:</span> <span class="detail-value">${enquiry.event_type}</span></div>` : ''}
-        ${enquiry.event_date ? `<div class="detail-row"><span class="detail-label">Event Date:</span> <span class="detail-value">${enquiry.event_date}</span></div>` : ''}
+        ${row('Email', enquiry.email)}
+        ${row('Event Type', enquiry.event_type)}
+        ${row('Event Date', enquiry.event_date)}
+        ${row('Event Location', enquiry.event_location)}
+        ${row('Guest Count', enquiry.guest_count)}
+        ${row('Budget', enquiry.budget_range)}
+        ${row('Venue Access', enquiry.venue_access)}
         <div class="detail-row"><span class="detail-label">Items Requested:</span></div>
         <ul>${itemsList}</ul>
+        ${enquiry.additional_notes ? `<div style="margin-top:12px;"><span class="detail-label">Customer Notes:</span><p style="font-size:14px;color:#1a1a1a;margin:6px 0 0;white-space:pre-wrap;">${enquiry.additional_notes}</p></div>` : ''}
       </div>
       <div style="margin-top: 24px; text-align: center;">
-        <a href="${APP_URL}" class="btn">View in Ideal Invoicing</a>
+        <a href="${APP_URL}/enquiries" class="btn">View in Ideal Invoicing</a>
       </div>
     `),
   });

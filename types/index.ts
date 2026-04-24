@@ -237,7 +237,9 @@ export interface WebsiteEnquiry {
   event_type: string | null;
   event_date: string | null;
   event_location: string | null;
-  guest_count: number | null;
+  guest_count: string | null;
+  budget_range: string | null;
+  venue_access: string | null;
   selected_items: EnquiryItem[];
   additional_notes: string | null;
   status: 'new' | 'converted' | 'dismissed';
