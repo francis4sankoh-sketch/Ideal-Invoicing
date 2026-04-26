@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { PDFDownloadButton } from '@/components/pdf-download-button';
+import { LineItemPhotos } from '@/components/shared/line-item-photos';
+import { deletePhotosForLineItems } from '@/lib/utils/photo-upload';
 
 export default function QuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -162,7 +164,14 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
 
   const removeLineItem = (itemId: string) => {
     if (!quote) return;
+    const removed = quote.line_items.find((i) => i.id === itemId);
     updateQuote({ line_items: quote.line_items.filter((i) => i.id !== itemId) });
+    // Clean up any uploaded photos for this line item (fire and forget)
+    if (removed?.photos?.length) {
+      deletePhotosForLineItems([removed], supabase).catch((err) =>
+        console.error('Photo cleanup failed:', err)
+      );
+    }
   };
 
   const handleSave = async (status?: string) => {
@@ -328,6 +337,10 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
     }
     if (!confirm(`Delete quote ${quote.quote_number}? This cannot be undone.`)) return;
     setSaving(true);
+    // Clean up any line-item photos in storage before deleting the row
+    await deletePhotosForLineItems(quote.line_items, supabase).catch((err) =>
+      console.error('Photo cleanup failed:', err)
+    );
     await supabase.from('quote_messages').delete().eq('quote_id', quote.id);
     const { error } = await supabase.from('quotes').delete().eq('id', quote.id);
     setSaving(false);
@@ -592,22 +605,12 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
                           rows={2}
                           className="w-full px-3 py-2 border border-[var(--color-border)] rounded-md text-sm bg-white dark:bg-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
                         />
-                        <div className="flex flex-wrap gap-2">
-                          {item.photos?.map((url, i) => (
-                            <div key={i} className="w-16 h-16 rounded overflow-hidden relative group">
-                              <img src={url} alt="" className="w-full h-full object-cover" />
-                              <button
-                                onClick={() => {
-                                  const newPhotos = item.photos.filter((_, idx) => idx !== i);
-                                  updateLineItem(item.id, 'photos', newPhotos);
-                                }}
-                                className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center"
-                              >
-                                <Trash2 className="w-3 h-3 text-white" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
+                        <LineItemPhotos
+                          lineItemId={item.id}
+                          photos={item.photos || []}
+                          onChange={(next) => updateLineItem(item.id, 'photos', next)}
+                          max={3}
+                        />
                       </div>
                     )}
                   </div>

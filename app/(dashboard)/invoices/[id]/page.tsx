@@ -334,6 +334,23 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                   <td className="py-3">
                     <p className="font-medium whitespace-pre-line">{item.description}</p>
                     {item.notes && <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{item.notes}</p>}
+                    {item.photos && item.photos.length > 0 && (
+                      <div className="flex gap-1.5 mt-2">
+                        {item.photos.map((url, i) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <a
+                            key={i}
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block w-12 h-12 rounded overflow-hidden border border-[var(--color-border)] bg-[var(--color-bg-light)]"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={url} alt="" className="w-full h-full object-cover" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </td>
                   <td className="py-3 text-center">{item.quantity}</td>
                   <td className="py-3 text-right">{formatCurrency(item.unit_price)}</td>

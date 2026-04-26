@@ -94,6 +94,13 @@ export function InvoicePDF({ invoice, settings }: InvoicePDFProps) {
               <View style={styles.colDescription}>
                 <Text style={styles.tableCell}>{item.description}</Text>
                 {item.notes ? <Text style={styles.tableCellMuted}>{item.notes}</Text> : null}
+                {item.photos && item.photos.length > 0 ? (
+                  <View style={styles.photoRow}>
+                    {item.photos.slice(0, 3).map((url, idx) => (
+                      <Image key={idx} src={url} style={styles.photoThumb} />
+                    ))}
+                  </View>
+                ) : null}
               </View>
               <Text style={[styles.tableCell, styles.colQty]}>{item.quantity}</Text>
               <Text style={[styles.tableCell, styles.colUnit]}>{formatCurrencyPDF(item.unit_price)}</Text>

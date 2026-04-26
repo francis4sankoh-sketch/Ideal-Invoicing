@@ -145,6 +145,20 @@ export const styles = StyleSheet.create({
   colQty: { width: '12%', textAlign: 'center' },
   colUnit: { width: '19%', textAlign: 'right' },
   colTotal: { width: '19%', textAlign: 'right' },
+  // Line item photos
+  photoRow: {
+    flexDirection: 'row',
+    gap: 4,
+    marginTop: 4,
+  },
+  photoThumb: {
+    width: 48,
+    height: 48,
+    objectFit: 'cover',
+    borderWidth: 0.5,
+    borderColor: BRAND.border,
+    borderRadius: 2,
+  },
   // Totals
   totalsContainer: {
     flexDirection: 'row',
