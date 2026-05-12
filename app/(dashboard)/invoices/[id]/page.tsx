@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
 import { Invoice, Customer, BusinessSettings, Expense, PaymentRecord, PAYMENT_METHODS } from '@/types';
 import { formatCurrency, formatDateAU, formatDateDocument } from '@/lib/utils/format';
-import { ArrowLeft, Send, Bell, DollarSign, Ban, Copy, TrendingUp, TrendingDown, Receipt, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Send, Bell, DollarSign, Ban, Copy, TrendingUp, TrendingDown, Receipt, Plus, Trash2, Pencil } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PDFDownloadButton } from '@/components/pdf-download-button';
@@ -25,6 +25,10 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  // null = recording a new payment; a number = editing that index in payment_history
+  const [editingPaymentIndex, setEditingPaymentIndex] = useState<number | null>(null);
+  const [eventDetailsModalOpen, setEventDetailsModalOpen] = useState(false);
+  const [eventDetails, setEventDetails] = useState({ event_date: '', event_location: '' });
   const [sendModalOpen, setSendModalOpen] = useState(false);
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
@@ -61,37 +65,57 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     setLoading(false);
   };
 
+  // Recompute amount_paid / balance_due / status from a payment_history array.
+  const recomputeTotals = (history: PaymentRecord[]) => {
+    if (!invoice) return null;
+    const amountPaid = history.reduce((s, p) => s + p.amount, 0);
+    const balanceDue = invoice.total - amountPaid;
+    let status: Invoice['status'] = 'partially_paid';
+    if (history.length === 0 || amountPaid === 0) status = 'unpaid';
+    else if (balanceDue <= 0) status = 'paid';
+    return {
+      payment_history: history,
+      amount_paid: amountPaid,
+      balance_due: Math.max(0, balanceDue),
+      status,
+      paid_date:
+        status === 'paid'
+          ? invoice.paid_date || new Date().toISOString().split('T')[0]
+          : null,
+    };
+  };
+
   const handleRecordPayment = async () => {
     if (!invoice || payment.amount <= 0) return;
     setSaving(true);
 
-    const newPayment: PaymentRecord = {
+    const entry: PaymentRecord = {
       date: payment.date,
       amount: payment.amount,
       payment_method: payment.payment_method,
       notes: payment.notes,
     };
 
-    const paymentHistory = [...(invoice.payment_history || []), newPayment];
-    const amountPaid = paymentHistory.reduce((s, p) => s + p.amount, 0);
-    const balanceDue = invoice.total - amountPaid;
-    let status: Invoice['status'] = 'partially_paid';
-    if (balanceDue <= 0) status = 'paid';
-    else if (balanceDue === invoice.total) status = 'unpaid';
+    const isEditing = editingPaymentIndex !== null;
+    const previous = invoice.payment_history || [];
+    const history = isEditing
+      ? previous.map((p, i) => (i === editingPaymentIndex ? entry : p))
+      : [...previous, entry];
 
-    const updates = {
-      payment_history: paymentHistory,
-      amount_paid: amountPaid,
-      balance_due: Math.max(0, balanceDue),
-      status,
-      paid_date: status === 'paid' ? new Date().toISOString().split('T')[0] : invoice.paid_date,
-    };
+    const updates = recomputeTotals(history);
+    if (!updates) return;
 
-    await supabase.from('invoices').update(updates).eq('id', invoice.id);
+    const { error } = await supabase.from('invoices').update(updates).eq('id', invoice.id);
+    if (error) {
+      console.error('Failed to save payment:', error);
+      alert(`Failed to save payment: ${error.message}`);
+      setSaving(false);
+      return;
+    }
     setInvoice({ ...invoice, ...updates });
 
-    // Send payment confirmation email
-    if (customer) {
+    // Only send confirmation email when ADDING a new payment, not when editing
+    if (!isEditing && customer) {
       try {
         await fetch('/api/send-email', {
           method: 'POST',
@@ -102,7 +126,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             customerName: customer.contact_name,
             invoiceNumber: invoice.invoice_number,
             amountPaid: formatCurrency(payment.amount),
-            remainingBalance: formatCurrency(Math.max(0, balanceDue)),
+            remainingBalance: formatCurrency(updates.balance_due),
           }),
         });
       } catch (err) {
@@ -111,6 +135,83 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     }
 
     setPaymentModalOpen(false);
+    setEditingPaymentIndex(null);
+    setSaving(false);
+  };
+
+  const handleOpenPaymentModal = (editIndex: number | null = null) => {
+    if (editIndex !== null && invoice?.payment_history?.[editIndex]) {
+      const p = invoice.payment_history[editIndex];
+      setPayment({
+        date: p.date,
+        amount: p.amount,
+        payment_method: p.payment_method,
+        notes: p.notes || '',
+      });
+      setEditingPaymentIndex(editIndex);
+    } else {
+      // New payment — default to remaining balance
+      setPayment({
+        date: new Date().toISOString().split('T')[0],
+        amount: invoice?.balance_due || 0,
+        payment_method: 'bank_transfer',
+        notes: '',
+      });
+      setEditingPaymentIndex(null);
+    }
+    setPaymentModalOpen(true);
+  };
+
+  const handleOpenEventDetails = () => {
+    if (!invoice) return;
+    setEventDetails({
+      event_date: invoice.event_date || '',
+      event_location: invoice.event_location || '',
+    });
+    setEventDetailsModalOpen(true);
+  };
+
+  const handleSaveEventDetails = async () => {
+    if (!invoice) return;
+    setSaving(true);
+    const updates = {
+      event_date: eventDetails.event_date || null,
+      event_location: eventDetails.event_location.trim() || null,
+    };
+    const { error } = await supabase.from('invoices').update(updates).eq('id', invoice.id);
+    if (error) {
+      alert(`Failed to update event details: ${error.message}`);
+      setSaving(false);
+      return;
+    }
+    setInvoice({ ...invoice, ...updates });
+    setEventDetailsModalOpen(false);
+    setSaving(false);
+  };
+
+  const handleDeletePayment = async (index: number) => {
+    if (!invoice || !invoice.payment_history) return;
+    const p = invoice.payment_history[index];
+    if (!p) return;
+    if (
+      !confirm(
+        `Delete this payment of ${formatCurrency(p.amount)} on ${formatDateAU(p.date)}? This will recalculate the invoice balance.`
+      )
+    )
+      return;
+
+    setSaving(true);
+    const history = invoice.payment_history.filter((_, i) => i !== index);
+    const updates = recomputeTotals(history);
+    if (!updates) return;
+
+    const { error } = await supabase.from('invoices').update(updates).eq('id', invoice.id);
+    if (error) {
+      alert(`Failed to delete payment: ${error.message}`);
+      setSaving(false);
+      return;
+    }
+    setInvoice({ ...invoice, ...updates });
     setSaving(false);
   };
 
@@ -261,10 +362,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               }}>
                 <Send className="w-3.5 h-3.5" /> Send Invoice
               </Button>
-              <Button size="sm" onClick={() => {
-                setPayment({ date: new Date().toISOString().split('T')[0], amount: invoice.balance_due, payment_method: 'bank_transfer', notes: '' });
-                setPaymentModalOpen(true);
-              }}>
+              <Button size="sm" onClick={() => handleOpenPaymentModal(null)}>
                 <DollarSign className="w-3.5 h-3.5" /> Record Payment
               </Button>
             </>
@@ -309,13 +407,29 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               {customer?.business_name && <p className="text-sm text-[var(--color-text-muted)]">{customer.business_name}</p>}
               <p className="text-xs text-[var(--color-text-muted)]">{customer?.email}</p>
             </div>
-            {(invoice.event_date || invoice.event_location) && (
-              <div>
-                <p className="text-xs font-bold text-[var(--color-text-muted)] uppercase mb-1">Event Details</p>
-                {invoice.event_date && <p className="text-sm">{formatDateDocument(invoice.event_date)}</p>}
-                {invoice.event_location && <p className="text-sm text-[var(--color-text-muted)]">{invoice.event_location}</p>}
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <p className="text-xs font-bold text-[var(--color-text-muted)] uppercase">Event Details</p>
+                <button
+                  type="button"
+                  onClick={handleOpenEventDetails}
+                  disabled={saving}
+                  aria-label="Edit event details"
+                  className="p-1 rounded hover:bg-[var(--color-bg-light)] text-[var(--color-text-muted)] hover:text-[var(--color-primary)] disabled:opacity-50"
+                  title="Edit event details"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
               </div>
-            )}
+              {invoice.event_date ? (
+                <p className="text-sm">{formatDateDocument(invoice.event_date)}</p>
+              ) : (
+                <p className="text-sm text-[var(--color-text-muted)] italic">No event date set</p>
+              )}
+              {invoice.event_location && (
+                <p className="text-sm text-[var(--color-text-muted)]">{invoice.event_location}</p>
+              )}
+            </div>
           </div>
 
           {/* Line Items */}
@@ -425,6 +539,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     <th className="py-2 text-right font-medium">Amount</th>
                     <th className="py-2 text-left font-medium">Method</th>
                     <th className="py-2 text-left font-medium">Notes</th>
+                    <th className="py-2 text-right font-medium w-24">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -434,6 +549,30 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                       <td className="py-2 text-right text-green-600 font-medium">{formatCurrency(p.amount)}</td>
                       <td className="py-2 capitalize">{p.payment_method.replace(/_/g, ' ')}</td>
                       <td className="py-2 text-[var(--color-text-muted)]">{p.notes || '—'}</td>
+                      <td className="py-2 text-right">
+                        <div className="inline-flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenPaymentModal(idx)}
+                            disabled={saving}
+                            aria-label="Edit payment"
+                            className="p-1.5 rounded hover:bg-[var(--color-bg-light)] text-[var(--color-text-muted)] hover:text-[var(--color-primary)] disabled:opacity-50"
+                            title="Edit payment"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeletePayment(idx)}
+                            disabled={saving}
+                            aria-label="Delete payment"
+                            className="p-1.5 rounded hover:bg-red-50 text-[var(--color-text-muted)] hover:text-red-600 disabled:opacity-50"
+                            title="Delete payment"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -550,8 +689,15 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         )}
       </div>
 
-      {/* Record Payment Modal */}
-      <Modal open={paymentModalOpen} onClose={() => setPaymentModalOpen(false)} title="Record Payment">
+      {/* Record/Edit Payment Modal */}
+      <Modal
+        open={paymentModalOpen}
+        onClose={() => {
+          setPaymentModalOpen(false);
+          setEditingPaymentIndex(null);
+        }}
+        title={editingPaymentIndex !== null ? 'Edit Payment' : 'Record Payment'}
+      >
         <div className="space-y-4">
           <Input label="Date" type="date" value={payment.date} onChange={(e) => setPayment({ ...payment, date: e.target.value })} />
           <Input label="Amount (AUD)" type="number" step="0.01" value={payment.amount || ''} onChange={(e) => setPayment({ ...payment, amount: parseFloat(e.target.value) || 0 })} />
@@ -561,11 +707,58 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             ))}
           </Select>
           <Input label="Notes" value={payment.notes} onChange={(e) => setPayment({ ...payment, notes: e.target.value })} />
+          {editingPaymentIndex !== null && (
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Editing an existing payment won&apos;t send a new confirmation email.
+            </p>
+          )}
         </div>
         <div className="flex justify-end gap-3 mt-6">
-          <Button variant="outline" onClick={() => setPaymentModalOpen(false)}>Cancel</Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setPaymentModalOpen(false);
+              setEditingPaymentIndex(null);
+            }}
+          >
+            Cancel
+          </Button>
           <Button onClick={handleRecordPayment} loading={saving}>
-            <DollarSign className="w-4 h-4" /> Record Payment
+            <DollarSign className="w-4 h-4" />
+            {editingPaymentIndex !== null ? 'Save Changes' : 'Record Payment'}
+          </Button>
+        </div>
+      </Modal>
+
+      {/* Edit Event Details Modal */}
+      <Modal
+        open={eventDetailsModalOpen}
+        onClose={() => setEventDetailsModalOpen(false)}
+        title="Edit Event Details"
+      >
+        <div className="space-y-4">
+          <Input
+            label="Event Date"
+            type="date"
+            value={eventDetails.event_date}
+            onChange={(e) => setEventDetails({ ...eventDetails, event_date: e.target.value })}
+          />
+          <Input
+            label="Event Location"
+            value={eventDetails.event_location}
+            onChange={(e) => setEventDetails({ ...eventDetails, event_location: e.target.value })}
+            placeholder="e.g. 95/90 Cranwell Street, Braybrook"
+          />
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Updating the event date here doesn&apos;t change the invoice due date or send a new email.
+          </p>
+        </div>
+        <div className="flex justify-end gap-3 mt-6">
+          <Button variant="outline" onClick={() => setEventDetailsModalOpen(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleSaveEventDetails} loading={saving}>
+            Save Changes
           </Button>
         </div>
       </Modal>
