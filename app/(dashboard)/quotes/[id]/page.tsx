@@ -12,7 +12,7 @@ import { Quote, Customer, LineItem, BusinessSettings, Product, QuoteMessage } fr
 import { formatCurrency, formatDateAU, generateId } from '@/lib/utils/format';
 import {
   ArrowLeft, Plus, Trash2, Save, Send, FileDown, Copy, ArrowRightLeft,
-  MessageCircle, ChevronDown, ChevronUp, Upload, Package, CheckCircle2, CopyPlus
+  MessageCircle, ChevronDown, ChevronUp, Upload, Package, CheckCircle2, CopyPlus, AlertTriangle
 } from 'lucide-react';
 import Link from 'next/link';
 import { PDFDownloadButton } from '@/components/pdf-download-button';
@@ -38,8 +38,76 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+  const [stockWarnings, setStockWarnings] = useState<string[]>([]);
 
   useEffect(() => { loadData(); }, [id]);
+
+  // Re-check availability whenever the event date or line items change
+  useEffect(() => {
+    if (!quote?.event_date || !quote.line_items?.length || products.length === 0) {
+      setStockWarnings([]);
+      return;
+    }
+    checkAvailability();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quote?.event_date, quote?.line_items, products]);
+
+  const checkAvailability = async () => {
+    if (!quote?.event_date) return;
+
+    const norm = (s: string) => s.toLowerCase().trim();
+    // Map product name -> quantity_owned (only tracked products)
+    const tracked = new Map<string, { name: string; owned: number }>();
+    for (const p of products) {
+      if (p.quantity_owned != null) tracked.set(norm(p.name), { name: p.name, owned: p.quantity_owned });
+    }
+    if (tracked.size === 0) {
+      setStockWarnings([]);
+      return;
+    }
+
+    // Other bookings on the same event date: accepted quotes + non-cancelled invoices
+    const [otherQuotesRes, invoicesRes] = await Promise.all([
+      supabase
+        .from('quotes')
+        .select('id, quote_number, line_items')
+        .eq('event_date', quote.event_date)
+        .eq('status', 'accepted')
+        .neq('id', quote.id || '00000000-0000-0000-0000-000000000000'),
+      supabase
+        .from('invoices')
+        .select('id, invoice_number, line_items, status')
+        .eq('event_date', quote.event_date)
+        .neq('status', 'cancelled'),
+    ]);
+
+    // Tally committed quantity per tracked product across other bookings
+    const committed = new Map<string, number>();
+    const addItems = (items: LineItem[] | undefined) => {
+      for (const li of items || []) {
+        const key = norm(li.description || '');
+        if (tracked.has(key)) committed.set(key, (committed.get(key) || 0) + (li.quantity || 0));
+      }
+    };
+    for (const q of otherQuotesRes.data || []) addItems(q.line_items as LineItem[]);
+    for (const inv of invoicesRes.data || []) addItems(inv.line_items as LineItem[]);
+
+    // Compare against this quote's items
+    const warnings: string[] = [];
+    for (const li of quote.line_items) {
+      const key = norm(li.description || '');
+      const t = tracked.get(key);
+      if (!t) continue;
+      const already = committed.get(key) || 0;
+      const totalNeeded = already + (li.quantity || 0);
+      if (totalNeeded > t.owned) {
+        warnings.push(
+          `${t.name}: need ${totalNeeded} on ${formatDateAU(quote.event_date)} (${already} already booked + ${li.quantity} here) but you only own ${t.owned}.`
+        );
+      }
+    }
+    setStockWarnings(warnings);
+  };
 
   const loadData = async () => {
     const [settingsRes, customersRes, productsRes] = await Promise.all([
@@ -246,7 +314,10 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
         }),
       });
 
-      await supabase.from('quotes').update({ status: 'sent' }).eq('id', quote.id);
+      await supabase
+        .from('quotes')
+        .update({ status: 'sent', sent_at: new Date().toISOString(), reminder_count: 0, last_reminder_sent: null })
+        .eq('id', quote.id);
       setQuote({ ...quote, status: 'sent' });
       setSendModalOpen(false);
     } catch (err) {
@@ -541,6 +612,22 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
                 </Button>
               </div>
             </div>
+
+            {stockWarnings.length > 0 && (
+              <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-900/10 p-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+                  <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+                    Possible double-booking
+                  </span>
+                </div>
+                <ul className="text-xs text-amber-700 dark:text-amber-300 space-y-1 list-disc pl-5">
+                  {stockWarnings.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {quote.line_items.length === 0 ? (
               <div className="text-center py-8 text-sm text-[var(--color-text-muted)] border border-dashed border-[var(--color-border)] rounded-lg">

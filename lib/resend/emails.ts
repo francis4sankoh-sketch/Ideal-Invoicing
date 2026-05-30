@@ -157,6 +157,38 @@ export async function sendQuoteToCustomer(options: {
   });
 }
 
+export async function sendQuoteReminder(options: {
+  customerEmail: string;
+  customerName: string;
+  quoteNumber: string;
+  total: string;
+  portalUrl: string;
+  validUntil?: string;
+}) {
+  return sendEmail({
+    to: options.customerEmail,
+    subject: `Just checking in on your quote ${options.quoteNumber}`,
+    html: emailWrapper(`
+      <h2 style="color: #800020; font-family: Georgia, serif;">Still thinking it over?</h2>
+      <p style="font-size: 15px; line-height: 1.6;">Hi ${options.customerName},</p>
+      <p style="font-size: 15px; line-height: 1.6;">We wanted to gently follow up on the quote we sent through. We'd love to be part of your event and we're holding your items, but spots do book up.</p>
+      <div class="highlight" style="margin: 24px 0;">
+        <div class="detail-row"><span class="detail-label">Quote Number:</span> <span class="detail-value">${options.quoteNumber}</span></div>
+        <div class="detail-row"><span class="detail-label">Total:</span> <span class="detail-value">${options.total}</span></div>
+        ${options.validUntil ? `<div class="detail-row"><span class="detail-label">Valid Until:</span> <span class="detail-value">${options.validUntil}</span></div>` : ''}
+      </div>
+      <p style="font-size: 15px; line-height: 1.6;">You can review everything, accept, or send us a message right from the link below:</p>
+      <div style="margin: 28px 0; text-align: center;">
+        <a href="${options.portalUrl}" class="btn">View Your Quote</a>
+      </div>
+      <p style="font-size: 15px; line-height: 1.6;">If now isn't the right time or your plans have changed, just reply and let us know — no pressure at all.</p>
+      <p style="font-size: 15px; line-height: 1.6; margin-top: 24px;">Warm regards,<br><strong>The Ideal Events Group Team</strong><br>
+      <span style="font-size: 13px; color: #666;">Melbourne, Victoria</span><br>
+      <span style="font-size: 13px; color: #666;">info@idealeventsgroup.com.au</span></p>
+    `),
+  });
+}
+
 export async function sendQuoteAcceptedNotification(options: {
   customerName: string;
   quoteNumber: string;

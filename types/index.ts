@@ -121,6 +121,8 @@ export interface Product {
   has_color_variants: boolean;
   color_variants: ColorVariant[];
   is_active: boolean;
+  quantity_owned: number | null;
+  cost_price: number | null;
   created_at: string;
   updated_at: string;
 }

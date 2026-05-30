@@ -10,9 +10,11 @@ const pageTitles: Record<string, string> = {
   '/quotes': 'Quotes',
   '/invoices': 'Invoices',
   '/calendar': 'Calendar',
+  '/run-sheet': 'Run Sheet',
   '/products': 'Products',
   '/expenses': 'Expenses',
   '/purchase-orders': 'Purchase Orders',
+  '/reports': 'Reports',
   '/settings': 'Settings',
 };
 
@@ -33,7 +35,7 @@ export function Topbar({ onMenuClick }: TopbarProps) {
   };
 
   return (
-    <header className="h-16 bg-white dark:bg-[#1a1a1a] border-b border-[var(--color-accent)] flex items-center justify-between px-6 shrink-0">
+    <header className="h-16 bg-white dark:bg-[#1a1a1a] border-b border-[var(--color-accent)] flex items-center justify-between px-6 shrink-0 print:hidden">
       <div className="flex items-center gap-4">
         <button
           onClick={onMenuClick}

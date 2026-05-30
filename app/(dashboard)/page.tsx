@@ -23,6 +23,8 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
+type RangePreset = 'this_month' | 'last_month' | 'this_quarter' | 'this_year' | 'custom';
+
 interface DashboardStats {
   monthlyRevenue: number;
   monthlyExpenses: number;
@@ -89,17 +91,50 @@ export default function DashboardPage() {
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
   const [overdueInvoices, setOverdueInvoices] = useState<OverdueInvoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [rangePreset, setRangePreset] = useState<RangePreset>('this_month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const supabase = createClient();
   const router = useRouter();
 
+  // Resolve the active [start, end) window from the preset / custom inputs
+  const getRange = (): { start: Date; end: Date; label: string } => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    switch (rangePreset) {
+      case 'this_month':
+        return { start: new Date(y, m, 1), end: new Date(y, m + 1, 1), label: 'This Month' };
+      case 'last_month':
+        return { start: new Date(y, m - 1, 1), end: new Date(y, m, 1), label: 'Last Month' };
+      case 'this_quarter': {
+        const qStart = Math.floor(m / 3) * 3;
+        return { start: new Date(y, qStart, 1), end: new Date(y, qStart + 3, 1), label: 'This Quarter' };
+      }
+      case 'this_year':
+        return { start: new Date(y, 0, 1), end: new Date(y + 1, 0, 1), label: 'This Year' };
+      case 'custom': {
+        const start = customFrom ? new Date(customFrom) : new Date(y, m, 1);
+        // end is exclusive — add a day so the chosen end date is included
+        const end = customTo ? new Date(new Date(customTo).getTime() + 24 * 60 * 60 * 1000) : new Date(y, m + 1, 1);
+        return { start, end, label: 'Custom Range' };
+      }
+      default:
+        return { start: new Date(y, m, 1), end: new Date(y, m + 1, 1), label: 'This Month' };
+    }
+  };
+
   useEffect(() => {
     loadDashboard();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rangePreset, customFrom, customTo]);
 
   const loadDashboard = async () => {
     const now = new Date();
     const today = now.toISOString().split('T')[0];
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const range = getRange();
+    const rangeStart = range.start;
+    const rangeEnd = range.end;
     const next30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
     const [
@@ -130,13 +165,19 @@ export default function DashboardPage() {
     const invoices = invoicesRes.data || [];
     const allExpenses = expensesRes.data || [];
 
-    // Monthly stats
+    // Range-filtered stats (revenue recognised by paid_date, expenses by date)
+    const inRange = (d: string | null) => {
+      if (!d) return false;
+      const t = new Date(d).getTime();
+      return t >= rangeStart.getTime() && t < rangeEnd.getTime();
+    };
+
     const monthRevenue = invoices
-      .filter(i => i.paid_date && new Date(i.paid_date) >= new Date(startOfMonth))
+      .filter(i => inRange(i.paid_date))
       .reduce((sum, i) => sum + (i.amount_paid || 0), 0);
 
     const monthExpenses = allExpenses
-      .filter(e => e.date && new Date(e.date) >= new Date(startOfMonth))
+      .filter(e => inRange(e.date))
       .reduce((sum, e) => sum + (e.amount || 0), 0);
 
     const outstanding = invoices.filter(i => i.status === 'unpaid' || i.status === 'partially_paid' || i.status === 'overdue');
@@ -250,6 +291,8 @@ export default function DashboardPage() {
     );
   }
 
+  const rangeLabel = getRange().label;
+
   return (
     <div className="space-y-6">
       {/* Quick Actions */}
@@ -265,6 +308,46 @@ export default function DashboardPage() {
         </Link>
       </div>
 
+      {/* Date range filter (affects Revenue / Expenses / Profit) */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {([
+          ['this_month', 'This Month'],
+          ['last_month', 'Last Month'],
+          ['this_quarter', 'This Quarter'],
+          ['this_year', 'This Year'],
+          ['custom', 'Custom'],
+        ] as Array<[RangePreset, string]>).map(([value, label]) => (
+          <button
+            key={value}
+            onClick={() => setRangePreset(value)}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              rangePreset === value
+                ? 'bg-[var(--color-primary)] text-white'
+                : 'bg-[var(--color-bg-light)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+        {rangePreset === 'custom' && (
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={customFrom}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              className="px-2 py-1.5 border border-[var(--color-border)] rounded-md text-xs bg-white dark:bg-[#1a1a1a]"
+            />
+            <span className="text-xs text-[var(--color-text-muted)]">to</span>
+            <input
+              type="date"
+              value={customTo}
+              onChange={(e) => setCustomTo(e.target.value)}
+              className="px-2 py-1.5 border border-[var(--color-border)] rounded-md text-xs bg-white dark:bg-[#1a1a1a]"
+            />
+          </div>
+        )}
+      </div>
+
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <Card>
@@ -273,7 +356,7 @@ export default function DashboardPage() {
               <DollarSign className="w-5 h-5 text-green-600" />
             </div>
             <div>
-              <p className="text-xs text-[var(--color-text-muted)]">Revenue This Month</p>
+              <p className="text-xs text-[var(--color-text-muted)]">Revenue · {rangeLabel}</p>
               <p className="text-lg font-bold text-green-600">{formatCurrency(stats.monthlyRevenue)}</p>
             </div>
           </CardContent>
@@ -285,7 +368,7 @@ export default function DashboardPage() {
               <Receipt className="w-5 h-5 text-red-600" />
             </div>
             <div>
-              <p className="text-xs text-[var(--color-text-muted)]">Expenses This Month</p>
+              <p className="text-xs text-[var(--color-text-muted)]">Expenses · {rangeLabel}</p>
               <p className="text-lg font-bold text-red-600">{formatCurrency(stats.monthlyExpenses)}</p>
             </div>
           </CardContent>
@@ -297,7 +380,7 @@ export default function DashboardPage() {
               {stats.monthlyProfit >= 0 ? <TrendingUp className="w-5 h-5 text-green-600" /> : <TrendingDown className="w-5 h-5 text-red-600" />}
             </div>
             <div>
-              <p className="text-xs text-[var(--color-text-muted)]">Profit This Month</p>
+              <p className="text-xs text-[var(--color-text-muted)]">Profit · {rangeLabel}</p>
               <p className={`text-lg font-bold ${stats.monthlyProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatCurrency(stats.monthlyProfit)}</p>
             </div>
           </CardContent>

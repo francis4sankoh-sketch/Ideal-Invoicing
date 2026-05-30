@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
 import { Invoice, Customer, BusinessSettings, Expense, PaymentRecord, PAYMENT_METHODS } from '@/types';
 import { formatCurrency, formatDateAU, formatDateDocument } from '@/lib/utils/format';
-import { ArrowLeft, Send, Bell, DollarSign, Ban, Copy, TrendingUp, TrendingDown, Receipt, Plus, Trash2, Pencil } from 'lucide-react';
+import { ArrowLeft, Send, Bell, DollarSign, Ban, Copy, TrendingUp, TrendingDown, Receipt, Plus, Trash2, Pencil, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PDFDownloadButton } from '@/components/pdf-download-button';
@@ -85,6 +85,35 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     };
   };
 
+  // When the deposit (or more) has been paid, make sure there's a calendar
+  // appointment for the event. Idempotent — won't create a second one.
+  const ensureConfirmedAppointment = async (amountPaid: number) => {
+    if (!invoice) return;
+    const depositMet = invoice.deposit_amount > 0 && amountPaid >= invoice.deposit_amount;
+    if (!depositMet || !invoice.event_date) return;
+
+    // Already have an appointment linked to this invoice?
+    const { data: existing } = await supabase
+      .from('appointments')
+      .select('id')
+      .eq('invoice_id', invoice.id)
+      .limit(1);
+    if (existing && existing.length > 0) return;
+
+    const start = new Date(`${invoice.event_date}T09:00:00`);
+    const end = new Date(`${invoice.event_date}T17:00:00`);
+    await supabase.from('appointments').insert({
+      title: `${invoice.title || 'Event'} (${invoice.invoice_number})`,
+      customer_id: invoice.customer_id,
+      start_time: start.toISOString(),
+      end_time: end.toISOString(),
+      location: invoice.event_location,
+      status: 'scheduled',
+      invoice_id: invoice.id,
+      notes: 'Auto-created when deposit was paid.',
+    });
+  };
+
   const handleRecordPayment = async () => {
     if (!invoice || payment.amount <= 0) return;
     setSaving(true);
@@ -113,6 +142,13 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       return;
     }
     setInvoice({ ...invoice, ...updates });
+
+    // Auto-create the calendar appointment once the deposit is covered
+    try {
+      await ensureConfirmedAppointment(updates.amount_paid);
+    } catch (err) {
+      console.error('Failed to auto-create appointment:', err);
+    }
 
     // Only send confirmation email when ADDING a new payment, not when editing
     if (!isEditing && customer) {
@@ -497,8 +533,15 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                 <span>Total</span>
                 <span>{formatCurrency(invoice.total)}</span>
               </div>
-              <div className="flex justify-between text-sm bg-[var(--color-accent-light)] p-2 rounded">
-                <span>Deposit ({invoice.deposit_percentage}%)</span>
+              <div className="flex justify-between items-center text-sm bg-[var(--color-accent-light)] p-2 rounded">
+                <span className="flex items-center gap-1.5">
+                  Deposit ({invoice.deposit_percentage}%)
+                  {invoice.deposit_amount > 0 && invoice.amount_paid >= invoice.deposit_amount && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-700 bg-green-100 px-1.5 py-0.5 rounded-full">
+                      <CheckCircle2 className="w-3 h-3" /> Paid · Confirmed
+                    </span>
+                  )}
+                </span>
                 <span className="font-medium">{formatCurrency(invoice.deposit_amount)}</span>
               </div>
               <div className="flex justify-between text-sm text-green-600">

@@ -15,6 +15,8 @@ import {
   Settings,
   LogOut,
   Mail,
+  Truck,
+  BarChart3,
   X,
 } from 'lucide-react';
 
@@ -25,9 +27,11 @@ const navItems = [
   { href: '/quotes', label: 'Quotes', icon: FileText },
   { href: '/invoices', label: 'Invoices', icon: Receipt },
   { href: '/calendar', label: 'Calendar', icon: Calendar },
+  { href: '/run-sheet', label: 'Run Sheet', icon: Truck },
   { href: '/products', label: 'Products', icon: Package },
   { href: '/expenses', label: 'Expenses', icon: CreditCard },
   { href: '/purchase-orders', label: 'Purchase Orders', icon: ShoppingCart },
+  { href: '/reports', label: 'Reports', icon: BarChart3 },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -64,7 +68,7 @@ export function Sidebar({ userEmail, open, onClose }: SidebarProps) {
       )}
 
       <aside
-        className={`fixed top-0 left-0 h-full w-60 bg-[#800020] text-white flex flex-col z-50 transition-transform lg:translate-x-0 ${
+        className={`fixed top-0 left-0 h-full w-60 bg-[#800020] text-white flex flex-col z-50 transition-transform lg:translate-x-0 print:hidden ${
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >

@@ -26,6 +26,8 @@ export default function ProductsPage() {
     description: '',
     category: '',
     default_price: 0,
+    quantity_owned: '' as number | '',
+    cost_price: '' as number | '',
     gst_inclusive: false,
     is_active: true,
     has_color_variants: false,
@@ -43,7 +45,7 @@ export default function ProductsPage() {
 
   const openNew = () => {
     setEditingProduct(null);
-    setForm({ name: '', description: '', category: '', default_price: 0, gst_inclusive: false, is_active: true, has_color_variants: false, color_variants: [], photos: [] });
+    setForm({ name: '', description: '', category: '', default_price: 0, quantity_owned: '', cost_price: '', gst_inclusive: false, is_active: true, has_color_variants: false, color_variants: [], photos: [] });
     setModalOpen(true);
   };
 
@@ -54,6 +56,8 @@ export default function ProductsPage() {
       description: p.description || '',
       category: p.category || '',
       default_price: p.default_price,
+      quantity_owned: p.quantity_owned ?? '',
+      cost_price: p.cost_price ?? '',
       gst_inclusive: p.gst_inclusive,
       is_active: p.is_active,
       has_color_variants: p.has_color_variants,
@@ -72,6 +76,8 @@ export default function ProductsPage() {
       description: form.description || null,
       category: form.category || null,
       default_price: form.default_price,
+      quantity_owned: form.quantity_owned === '' ? null : Number(form.quantity_owned),
+      cost_price: form.cost_price === '' ? null : Number(form.cost_price),
       gst_inclusive: form.gst_inclusive,
       is_active: form.is_active,
       has_color_variants: form.has_color_variants,
@@ -226,6 +232,24 @@ export default function ProductsPage() {
             <Input label="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <Input label="Category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="e.g. chairs, backdrops, lighting" />
             <Input label="Default Price *" type="number" step="0.01" value={form.default_price || ''} onChange={(e) => setForm({ ...form, default_price: parseFloat(e.target.value) || 0 })} />
+            <Input
+              label="Quantity Owned"
+              type="number"
+              step="1"
+              min="0"
+              value={form.quantity_owned}
+              onChange={(e) => setForm({ ...form, quantity_owned: e.target.value === '' ? '' : parseInt(e.target.value) || 0 })}
+              placeholder="e.g. 200 (leave blank if not tracked)"
+            />
+            <Input
+              label="Cost Per Hire"
+              type="number"
+              step="0.01"
+              min="0"
+              value={form.cost_price}
+              onChange={(e) => setForm({ ...form, cost_price: e.target.value === '' ? '' : parseFloat(e.target.value) || 0 })}
+              placeholder="Your cost — for margin report (optional)"
+            />
             <div className="flex items-center gap-4 pt-6">
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={form.gst_inclusive} onChange={(e) => setForm({ ...form, gst_inclusive: e.target.checked })} />
