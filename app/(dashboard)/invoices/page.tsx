@@ -8,8 +8,9 @@ import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Invoice, Customer } from '@/types';
 import { formatCurrency, formatDateAU } from '@/lib/utils/format';
-import { Receipt, Search, Trash2 } from 'lucide-react';
+import { Receipt, Search, Trash2, FileSpreadsheet } from 'lucide-react';
 import Link from 'next/link';
+import { buildXeroInvoiceCsv, downloadCsv, type InvoiceForExport } from '@/lib/utils/xero-export';
 
 const STATUSES = ['all', 'unpaid', 'partially_paid', 'paid', 'overdue', 'cancelled'];
 
@@ -70,6 +71,17 @@ export default function InvoicesPage() {
     return true;
   });
 
+  const handleXeroExport = () => {
+    const exportable = filtered.filter((inv) => inv.status !== 'cancelled') as InvoiceForExport[];
+    if (exportable.length === 0) {
+      alert('No invoices to export for the current filter.');
+      return;
+    }
+    const csv = buildXeroInvoiceCsv(exportable);
+    const stamp = new Date().toISOString().split('T')[0];
+    downloadCsv(`xero-invoices-${stamp}.csv`, csv);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -108,6 +120,9 @@ export default function InvoicesPage() {
             ))}
           </div>
         </div>
+        <Button variant="outline" onClick={handleXeroExport} title="Download the listed invoices as a Xero-importable CSV">
+          <FileSpreadsheet className="w-4 h-4" /> Export to Xero
+        </Button>
       </div>
 
       {filtered.length === 0 ? (
