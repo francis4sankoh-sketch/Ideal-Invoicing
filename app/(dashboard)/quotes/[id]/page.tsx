@@ -243,13 +243,26 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
   };
 
   const handleSave = async (status?: string) => {
-    if (!quote || !quote.title || !quote.customer_id) return;
+    if (!quote) return;
+
+    // A customer is always required. A title is only required once you move
+    // past draft (send / accept); a plain draft can be saved without one.
+    const targetStatus = status || quote.status;
+    if (!quote.customer_id) {
+      alert('Please choose a customer before saving.');
+      return;
+    }
+    if (targetStatus !== 'draft' && !quote.title?.trim()) {
+      alert('Please add a title before sending or accepting this quote.');
+      return;
+    }
+
     setSaving(true);
 
     const payload = {
       quote_number: quote.quote_number,
       customer_id: quote.customer_id,
-      title: quote.title,
+      title: quote.title?.trim() || 'Untitled Quote',
       event_date: quote.event_date || null,
       event_location: quote.event_location || null,
       line_items: quote.line_items,
@@ -262,7 +275,7 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
       total: quote.total,
       deposit_percentage: quote.deposit_percentage,
       deposit_amount: quote.deposit_amount,
-      status: status || quote.status,
+      status: targetStatus,
       valid_until: quote.valid_until,
       notes: quote.notes,
       terms: quote.terms,
@@ -270,19 +283,27 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
 
     if (isNew) {
       const { data, error } = await supabase.from('quotes').insert(payload).select().single();
-      if (data) {
-        // Increment quote number
-        if (settings) {
-          await supabase
-            .from('business_settings')
-            .update({ next_quote_number: settings.next_quote_number + 1 })
-            .eq('id', settings.id);
-        }
-        router.push(`/quotes/${data.id}`);
+      if (error || !data) {
+        setSaving(false);
+        alert(`Failed to save quote: ${error?.message || 'Unknown error'}`);
+        return;
       }
+      // Increment quote number
+      if (settings) {
+        await supabase
+          .from('business_settings')
+          .update({ next_quote_number: settings.next_quote_number + 1 })
+          .eq('id', settings.id);
+      }
+      router.push(`/quotes/${data.id}`);
     } else {
-      await supabase.from('quotes').update(payload).eq('id', quote.id);
-      if (status) setQuote({ ...quote, status: status as Quote['status'] });
+      const { error } = await supabase.from('quotes').update(payload).eq('id', quote.id);
+      if (error) {
+        setSaving(false);
+        alert(`Failed to save quote: ${error.message}`);
+        return;
+      }
+      setQuote({ ...quote, ...payload, status: targetStatus as Quote['status'] });
     }
 
     setSaving(false);
