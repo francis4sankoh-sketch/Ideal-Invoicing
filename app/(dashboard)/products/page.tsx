@@ -68,14 +68,21 @@ export default function ProductsPage() {
   };
 
   const handleSave = async () => {
-    if (!form.name || !form.default_price) return;
+    if (!form.name?.trim()) {
+      alert('Please enter a product name.');
+      return;
+    }
+    if (form.default_price === null || form.default_price === undefined || isNaN(Number(form.default_price))) {
+      alert('Please enter a default price (use 0 if the price varies).');
+      return;
+    }
     setSaving(true);
 
     const payload = {
-      name: form.name,
+      name: form.name.trim(),
       description: form.description || null,
       category: form.category || null,
-      default_price: form.default_price,
+      default_price: Number(form.default_price),
       quantity_owned: form.quantity_owned === '' ? null : Number(form.quantity_owned),
       cost_price: form.cost_price === '' ? null : Number(form.cost_price),
       gst_inclusive: form.gst_inclusive,
@@ -85,14 +92,25 @@ export default function ProductsPage() {
       photos: form.photos,
     };
 
-    if (editingProduct) {
-      await supabase.from('products').update(payload).eq('id', editingProduct.id);
-    } else {
-      await supabase.from('products').insert(payload);
+    const { error } = editingProduct
+      ? await supabase.from('products').update(payload).eq('id', editingProduct.id)
+      : await supabase.from('products').insert(payload);
+
+    setSaving(false);
+
+    if (error) {
+      // Most likely cause: the cost_price (007) or quantity_owned (005)
+      // column hasn't been added in Supabase yet.
+      const missingCol = /column .* does not exist/i.test(error.message);
+      alert(
+        missingCol
+          ? `Couldn't save: ${error.message}\n\nRun the pending database migrations (005 quantity_owned, 007 cost_price) in the Supabase SQL editor, then try again.`
+          : `Failed to save product: ${error.message}`
+      );
+      return;
     }
 
     setModalOpen(false);
-    setSaving(false);
     loadProducts();
   };
 
