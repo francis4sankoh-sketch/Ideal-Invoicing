@@ -130,6 +130,32 @@ export async function uploadLineItemPhoto(
 }
 
 /**
+ * Upload a product photo to the `Products` bucket. Resizes (max 1200px) and
+ * converts HEIC to JPEG client-side so large phone photos don't bloat the
+ * Products page. Returns the public URL.
+ */
+export async function uploadProductPhoto(
+  file: File,
+  supabase: SupabaseClient
+): Promise<string> {
+  if (!isAcceptedFile(file)) {
+    throw new Error(`Unsupported file type: ${file.type || file.name}`);
+  }
+
+  const converted = await convertHeicIfNeeded(file);
+  const resized = await resizeImage(converted);
+  const path = `product-uploads/${randomFileName()}`;
+
+  const { error } = await supabase.storage
+    .from('Products')
+    .upload(path, resized, { contentType: 'image/jpeg', upsert: false });
+  if (error) throw error;
+
+  const { data } = supabase.storage.from('Products').getPublicUrl(path);
+  return data.publicUrl;
+}
+
+/**
  * Given a Supabase public URL like
  *   https://xxx.supabase.co/storage/v1/object/public/quotes/line-items/<id>/<file>.jpg
  * extract the storage-relative path ("line-items/<id>/<file>.jpg").

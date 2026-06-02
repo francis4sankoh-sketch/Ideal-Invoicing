@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { clearCache } from '@/lib/utils/cache';
 import {
   LayoutDashboard,
   Users,
@@ -47,6 +48,7 @@ export function Sidebar({ userEmail, open, onClose }: SidebarProps) {
   const supabase = createClient();
 
   const handleLogout = async () => {
+    clearCache();
     await supabase.auth.signOut();
     router.push('/login');
     router.refresh();

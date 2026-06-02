@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input, Textarea, Select } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { AUSTRALIAN_STATES, BusinessSettings } from '@/types';
+import { invalidate } from '@/lib/utils/cache';
 import { Save, Upload } from 'lucide-react';
 
 export default function SettingsPage() {
@@ -38,6 +39,7 @@ export default function SettingsPage() {
     if (error) {
       setMessage('Error saving settings: ' + error.message);
     } else {
+      invalidate('business_settings'); // so other pages pick up the change
       setMessage('Settings saved successfully!');
     }
     setSaving(false);

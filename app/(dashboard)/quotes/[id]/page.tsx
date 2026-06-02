@@ -18,6 +18,7 @@ import Link from 'next/link';
 import { PDFDownloadButton } from '@/components/pdf-download-button';
 import { LineItemPhotos } from '@/components/shared/line-item-photos';
 import { deletePhotosForLineItems } from '@/lib/utils/photo-upload';
+import { cached, invalidate, TTL } from '@/lib/utils/cache';
 
 export default function QuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -110,15 +111,22 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
   };
 
   const loadData = async () => {
-    const [settingsRes, customersRes, productsRes] = await Promise.all([
-      supabase.from('business_settings').select('*').limit(1).single(),
+    // Settings + active products rarely change, so cache them — flipping
+    // between quotes reuses the cached copies instead of refetching.
+    const [settingsRes, customersRes, productsData] = await Promise.all([
+      cached('business_settings', TTL.long, async () =>
+        supabase.from('business_settings').select('*').limit(1).single()
+      ),
       supabase.from('customers').select('*').order('contact_name'),
-      supabase.from('products').select('*').eq('is_active', true).order('name'),
+      cached('products_active', TTL.medium, async () => {
+        const { data } = await supabase.from('products').select('*').eq('is_active', true).order('name');
+        return data || [];
+      }),
     ]);
 
     setSettings(settingsRes.data);
     setCustomers(customersRes.data || []);
-    setProducts(productsRes.data || []);
+    setProducts(productsData);
 
     if (isNew) {
       const s = settingsRes.data;

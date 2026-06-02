@@ -8,6 +8,8 @@ import { Modal } from '@/components/ui/modal';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Product, ColorVariant } from '@/types';
 import { formatCurrency } from '@/lib/utils/format';
+import { uploadProductPhoto, ACCEPT_ATTR } from '@/lib/utils/photo-upload';
+import { cached, invalidate, TTL } from '@/lib/utils/cache';
 import { Package, Plus, Search, Trash2, Image as ImageIcon } from 'lucide-react';
 
 export default function ProductsPage() {
@@ -37,9 +39,13 @@ export default function ProductsPage() {
 
   useEffect(() => { loadProducts(); }, []);
 
-  const loadProducts = async () => {
-    const { data } = await supabase.from('products').select('*').order('name');
-    if (data) setProducts(data);
+  const loadProducts = async (force = false) => {
+    if (force) invalidate('products_all');
+    const data = await cached('products_all', TTL.medium, async () => {
+      const res = await supabase.from('products').select('*').order('name');
+      return res.data || [];
+    });
+    setProducts(data);
     setLoading(false);
   };
 
@@ -110,8 +116,10 @@ export default function ProductsPage() {
       return;
     }
 
+    // A product changed — clear the quote builder's active-products cache too
+    invalidate('products_active');
     setModalOpen(false);
-    loadProducts();
+    loadProducts(true);
   };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -119,16 +127,19 @@ export default function ProductsPage() {
     if (!files) return;
 
     const urls: string[] = [];
+    const errors: string[] = [];
     for (const file of Array.from(files)) {
-      const ext = file.name.split('.').pop();
-      const path = `product-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const { error } = await supabase.storage.from('Products').upload(path, file);
-      if (!error) {
-        const { data: { publicUrl } } = supabase.storage.from('Products').getPublicUrl(path);
-        urls.push(publicUrl);
+      try {
+        // Resizes to max 1200px + converts HEIC before upload — keeps the
+        // Products page fast instead of loading multi-MB phone photos.
+        urls.push(await uploadProductPhoto(file, supabase));
+      } catch (err) {
+        errors.push(`${file.name}: ${err instanceof Error ? err.message : 'upload failed'}`);
       }
     }
-    setForm({ ...form, photos: [...form.photos, ...urls] });
+    if (urls.length) setForm((f) => ({ ...f, photos: [...f.photos, ...urls] }));
+    if (errors.length) alert(`Some photos didn't upload:\n${errors.join('\n')}`);
+    if (e.target) e.target.value = '';
   };
 
   const addVariant = () => {
@@ -299,7 +310,7 @@ export default function ProductsPage() {
               ))}
               <label className="w-20 h-20 border-2 border-dashed border-[var(--color-border)] rounded flex items-center justify-center cursor-pointer hover:border-[var(--color-primary)] transition-colors">
                 <Plus className="w-5 h-5 text-[var(--color-text-muted)]" />
-                <input type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoUpload} />
+                <input type="file" accept={ACCEPT_ATTR} multiple className="hidden" onChange={handlePhotoUpload} />
               </label>
             </div>
           </div>
