@@ -38,23 +38,32 @@ export default function CustomersPage() {
   }, []);
 
   const loadCustomers = async () => {
-    const { data: customerData } = await supabase
-      .from('customers')
-      .select('*')
-      .order('created_at', { ascending: false });
+    // Fetch everything in 3 queries total (not 2 per customer). We pull just
+    // the customer_id columns from quotes/invoices and tally counts in memory.
+    const [customerRes, quoteRes, invoiceRes] = await Promise.all([
+      supabase.from('customers').select('*').order('created_at', { ascending: false }),
+      supabase.from('quotes').select('customer_id'),
+      supabase.from('invoices').select('customer_id'),
+    ]);
 
-    if (customerData) {
-      const withCounts = await Promise.all(
-        customerData.map(async (c) => {
-          const [qRes, iRes] = await Promise.all([
-            supabase.from('quotes').select('id', { count: 'exact', head: true }).eq('customer_id', c.id),
-            supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('customer_id', c.id),
-          ]);
-          return { ...c, quote_count: qRes.count || 0, invoice_count: iRes.count || 0 };
-        })
-      );
-      setCustomers(withCounts);
-    }
+    const customerData = customerRes.data || [];
+    const tally = (rows: { customer_id: string | null }[] | null) => {
+      const m = new Map<string, number>();
+      for (const r of rows || []) {
+        if (r.customer_id) m.set(r.customer_id, (m.get(r.customer_id) || 0) + 1);
+      }
+      return m;
+    };
+    const quoteCounts = tally(quoteRes.data);
+    const invoiceCounts = tally(invoiceRes.data);
+
+    setCustomers(
+      customerData.map((c) => ({
+        ...c,
+        quote_count: quoteCounts.get(c.id) || 0,
+        invoice_count: invoiceCounts.get(c.id) || 0,
+      }))
+    );
     setLoading(false);
   };
 
