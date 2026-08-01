@@ -4,8 +4,11 @@ function getResend() {
   return new Resend(process.env.RESEND_API_KEY);
 }
 
+// NOTE: idealeventshire.com.au must be verified as a sending domain in
+// Resend (Domains > Add Domain, then add the DNS records) before switching
+// FROM_EMAIL to it — sends will fail outright from an unverified domain.
 const FROM_EMAIL = 'Ideal Events Group <info@idealeventsgroup.com.au>';
-const BUSINESS_EMAILS = ['francis4sankoh@gmail.com', 'info@idealeventsgroup.com.au'];
+const BUSINESS_EMAILS = ['info@idealeventshire.com.au'];
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
 interface EmailOptions {
