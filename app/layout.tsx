@@ -4,7 +4,7 @@ import { ThemeProvider } from "@/components/shared/theme-provider";
 
 export const metadata: Metadata = {
   title: "Ideal Invoicing",
-  description: "Business management for Ideal Events Group",
+  description: "Business management for Ideal Events Hire",
 };
 
 export default function RootLayout({

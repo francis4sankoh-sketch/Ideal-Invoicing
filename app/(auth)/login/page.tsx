@@ -99,7 +99,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-xs text-[var(--color-text-muted)] mt-6">
-          Ideal Events Group &middot; Melbourne, VIC
+          Ideal Events Hire &middot; Melbourne, VIC
         </p>
       </div>
     </div>

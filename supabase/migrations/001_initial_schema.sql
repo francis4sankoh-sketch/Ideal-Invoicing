@@ -203,7 +203,7 @@ CREATE TABLE IF NOT EXISTS templates (
 -- ============================================
 CREATE TABLE IF NOT EXISTS business_settings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  business_name text DEFAULT 'Ideal Events Group',
+  business_name text DEFAULT 'Ideal Events Hire',
   abn text,
   logo_url text,
   email text,
@@ -259,9 +259,9 @@ CREATE TABLE IF NOT EXISTS website_enquiries (
 INSERT INTO business_settings (
   business_name, email, website, default_terms
 ) VALUES (
-  'Ideal Events Group',
-  'info@idealeventsgroup.com.au',
-  'https://idealeventsgroup.com.au',
+  'Ideal Events Hire',
+  'info@idealeventshire.com.au',
+  'https://idealeventshire.com.au',
   'Payment is due within 14 days of invoice issue date. A 20% deposit is required to confirm your booking. Cancellations within 7 days of the event may forfeit the deposit. All prices are in Australian Dollars (AUD).'
 ) ON CONFLICT DO NOTHING;
 

@@ -277,7 +277,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
                 <div>
                   {settings?.logo_url && <img src={settings.logo_url} alt="Logo" className="h-10 mb-2" />}
                   <h3 className="text-lg font-bold text-[#800020]" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
-                    {settings?.business_name || 'Ideal Events Group'}
+                    {settings?.business_name || 'Ideal Events Hire'}
                   </h3>
                   <p className="text-xs text-gray-500">
                     {settings?.abn && `ABN: ${settings.abn}`}<br />
@@ -472,7 +472,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
               <div>
                 {settings?.logo_url && <img src={settings.logo_url} alt="Logo" className="h-10 mb-2" />}
                 <h3 className="text-lg font-bold text-[#800020]" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
-                  {settings?.business_name || 'Ideal Events Group'}
+                  {settings?.business_name || 'Ideal Events Hire'}
                 </h3>
                 <p className="text-xs text-gray-500">{settings?.abn && `ABN: ${settings.abn}`}</p>
               </div>
@@ -571,7 +571,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
 
       {/* Footer */}
       <footer className="text-center py-6 text-xs text-gray-400">
-        <p>Ideal Events Group &middot; Melbourne, Victoria &middot; idealeventsgroup.com.au</p>
+        <p>Ideal Events Hire &middot; Melbourne, Victoria &middot; idealeventshire.com.au</p>
       </footer>
     </div>
   );

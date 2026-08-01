@@ -1,6 +1,6 @@
 # Ideal Invoicing
 
-Business management application for **Ideal Events Group** — an Australian event styling and decor hire business based in Melbourne, Victoria.
+Business management application for **Ideal Events Hire** — an Australian event styling and decor hire business based in Melbourne, Victoria.
 
 ## Tech Stack
 
@@ -111,7 +111,7 @@ GET /api/products?category=chairs
 
 ### Website Integration Instructions
 
-To connect the Ideal Events Group Netlify website:
+To connect the Ideal Events Hire Netlify website:
 
 1. **Quote request form:** On form submission, POST to `https://YOUR_DOMAIN/api/enquiry` with the `x-api-secret` header
 2. **Product listings:** Fetch `https://YOUR_DOMAIN/api/products` to display live products
@@ -129,4 +129,4 @@ To connect the Ideal Events Group Netlify website:
 
 ---
 
-Built for Ideal Events Group - Melbourne, Victoria - 2026
+Built for Ideal Events Hire - Melbourne, Victoria - 2026

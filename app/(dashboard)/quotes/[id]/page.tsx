@@ -505,7 +505,7 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
     await supabase.from('quote_messages').insert({
       quote_id: quote.id,
       sender_type: 'business',
-      sender_name: 'Ideal Events Group',
+      sender_name: 'Ideal Events Hire',
       message: messageText.trim(),
     });
 
@@ -588,7 +588,7 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
                 <Button
                   size="sm"
                   onClick={() => {
-                    setEmailSubject(`Your quote from Ideal Events Group — ${quote.quote_number}`);
+                    setEmailSubject(`Your quote from Ideal Events Hire — ${quote.quote_number}`);
                     setEmailBody('');
                     setSendModalOpen(true);
                   }}

@@ -4,7 +4,7 @@ function getResend() {
   return new Resend(process.env.RESEND_API_KEY);
 }
 
-const FROM_EMAIL = 'Ideal Events Group <info@idealeventshire.com.au>';
+const FROM_EMAIL = 'Ideal Events Hire <info@idealeventshire.com.au>';
 const BUSINESS_EMAILS = ['info@idealeventshire.com.au'];
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
@@ -59,14 +59,14 @@ function emailWrapper(content: string): string {
       <div class="container">
         <div class="header">
           <h1>Ideal</h1>
-          <p>Events Group</p>
+          <p>Events Hire</p>
         </div>
         <div class="body">
           ${content}
         </div>
         <div class="footer">
-          <p>Ideal Events Group &middot; Melbourne, Victoria</p>
-          <p>info@idealeventsgroup.com.au &middot; idealeventsgroup.com.au</p>
+          <p>Ideal Events Hire &middot; Melbourne, Victoria</p>
+          <p>info@idealeventshire.com.au &middot; idealeventshire.com.au</p>
         </div>
       </div>
     </body>
@@ -131,7 +131,7 @@ export async function sendQuoteToCustomer(options: {
 }) {
   return sendEmail({
     to: [options.customerEmail, ...BUSINESS_EMAILS],
-    subject: options.subject || `Your quote from Ideal Events Group — ${options.quoteNumber}`,
+    subject: options.subject || `Your quote from Ideal Events Hire — ${options.quoteNumber}`,
     html: emailWrapper(
       options.body ||
       `
@@ -150,9 +150,9 @@ export async function sendQuoteToCustomer(options: {
       </div>
       <p style="font-size: 15px; line-height: 1.6;">If you have any questions at all, feel free to reply directly to this email or send us a message through the portal. We're always happy to help!</p>
       <p style="font-size: 15px; line-height: 1.6;">We look forward to making your event truly special.</p>
-      <p style="font-size: 15px; line-height: 1.6; margin-top: 24px;">Warm regards,<br><strong>The Ideal Events Group Team</strong><br>
+      <p style="font-size: 15px; line-height: 1.6; margin-top: 24px;">Warm regards,<br><strong>The Ideal Events Hire Team</strong><br>
       <span style="font-size: 13px; color: #666;">Melbourne, Victoria</span><br>
-      <span style="font-size: 13px; color: #666;">info@idealeventsgroup.com.au</span></p>
+      <span style="font-size: 13px; color: #666;">info@idealeventshire.com.au</span></p>
     `),
   });
 }
@@ -182,9 +182,9 @@ export async function sendQuoteReminder(options: {
         <a href="${options.portalUrl}" class="btn">View Your Quote</a>
       </div>
       <p style="font-size: 15px; line-height: 1.6;">If now isn't the right time or your plans have changed, just reply and let us know — no pressure at all.</p>
-      <p style="font-size: 15px; line-height: 1.6; margin-top: 24px;">Warm regards,<br><strong>The Ideal Events Group Team</strong><br>
+      <p style="font-size: 15px; line-height: 1.6; margin-top: 24px;">Warm regards,<br><strong>The Ideal Events Hire Team</strong><br>
       <span style="font-size: 13px; color: #666;">Melbourne, Victoria</span><br>
-      <span style="font-size: 13px; color: #666;">info@idealeventsgroup.com.au</span></p>
+      <span style="font-size: 13px; color: #666;">info@idealeventshire.com.au</span></p>
     `),
   });
 }
@@ -250,13 +250,13 @@ export async function sendInvoiceToCustomer(options: {
 }) {
   return sendEmail({
     to: [options.customerEmail, ...BUSINESS_EMAILS],
-    subject: options.subject || `Invoice ${options.invoiceNumber} from Ideal Events Group`,
+    subject: options.subject || `Invoice ${options.invoiceNumber} from Ideal Events Hire`,
     html: emailWrapper(
       options.body ||
       `
-      <h2 style="color: #800020; font-family: Georgia, serif;">Your Invoice from Ideal Events Group</h2>
+      <h2 style="color: #800020; font-family: Georgia, serif;">Your Invoice from Ideal Events Hire</h2>
       <p style="font-size: 15px; line-height: 1.6;">Hi ${options.customerName},</p>
-      <p style="font-size: 15px; line-height: 1.6;">Thank you for choosing Ideal Events Group! We truly appreciate your business and can't wait to help make your event unforgettable.</p>
+      <p style="font-size: 15px; line-height: 1.6;">Thank you for choosing Ideal Events Hire! We truly appreciate your business and can't wait to help make your event unforgettable.</p>
       <p style="font-size: 15px; line-height: 1.6;">Please find your invoice details below:</p>
       <div class="highlight" style="margin: 24px 0;">
         <div class="detail-row"><span class="detail-label">Invoice Number:</span> <span class="detail-value">${options.invoiceNumber}</span></div>
@@ -272,9 +272,9 @@ export async function sendInvoiceToCustomer(options: {
         <a href="${options.portalUrl}" class="btn">View Your Invoice</a>
       </div>
       <p style="font-size: 15px; line-height: 1.6;">If you have any questions about this invoice or your upcoming event, please don't hesitate to reply to this email. We're here to help!</p>
-      <p style="font-size: 15px; line-height: 1.6; margin-top: 24px;">Warm regards,<br><strong>The Ideal Events Group Team</strong><br>
+      <p style="font-size: 15px; line-height: 1.6; margin-top: 24px;">Warm regards,<br><strong>The Ideal Events Hire Team</strong><br>
       <span style="font-size: 13px; color: #666;">Melbourne, Victoria</span><br>
-      <span style="font-size: 13px; color: #666;">info@idealeventsgroup.com.au</span></p>
+      <span style="font-size: 13px; color: #666;">info@idealeventshire.com.au</span></p>
     `),
     attachments: options.pdfBuffer
       ? [{ filename: `${options.invoiceNumber}.pdf`, content: options.pdfBuffer }]
@@ -310,9 +310,9 @@ export async function sendPaymentReminder(options: {
         <a href="${options.portalUrl}" class="btn">View Your Invoice</a>
       </div>
       <p style="font-size: 15px; line-height: 1.6;">If you've already made the payment, please disregard this reminder — thank you! And if you have any questions, we're just an email away.</p>
-      <p style="font-size: 15px; line-height: 1.6; margin-top: 24px;">Warm regards,<br><strong>The Ideal Events Group Team</strong><br>
+      <p style="font-size: 15px; line-height: 1.6; margin-top: 24px;">Warm regards,<br><strong>The Ideal Events Hire Team</strong><br>
       <span style="font-size: 13px; color: #666;">Melbourne, Victoria</span><br>
-      <span style="font-size: 13px; color: #666;">info@idealeventsgroup.com.au</span></p>
+      <span style="font-size: 13px; color: #666;">info@idealeventshire.com.au</span></p>
     `),
   });
 }
@@ -338,9 +338,9 @@ export async function sendPaymentConfirmation(options: {
       </div>
       <p style="font-size: 15px; line-height: 1.6;">${parseFloat(options.remainingBalance.replace(/[^0-9.]/g, '')) > 0 ? 'The remaining balance can be paid at any time before your event date.' : 'Your invoice is now fully paid — you\'re all set!'}</p>
       <p style="font-size: 15px; line-height: 1.6;">We're looking forward to your event and making it something truly special. If there's anything else you need, don't hesitate to reach out.</p>
-      <p style="font-size: 15px; line-height: 1.6; margin-top: 24px;">Warm regards,<br><strong>The Ideal Events Group Team</strong><br>
+      <p style="font-size: 15px; line-height: 1.6; margin-top: 24px;">Warm regards,<br><strong>The Ideal Events Hire Team</strong><br>
       <span style="font-size: 13px; color: #666;">Melbourne, Victoria</span><br>
-      <span style="font-size: 13px; color: #666;">info@idealeventsgroup.com.au</span></p>
+      <span style="font-size: 13px; color: #666;">info@idealeventshire.com.au</span></p>
     `),
   });
 }
