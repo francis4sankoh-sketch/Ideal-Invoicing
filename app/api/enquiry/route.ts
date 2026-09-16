@@ -211,8 +211,11 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Failed to create enquiry' }, { status: 500 });
     }
 
-    // 3. Build a draft quote from the enquiry
-    let draftQuoteId: string | null = null;
+    // 3. Build a draft invoice from the enquiry (bookings now start as an
+    // invoice directly rather than a quote — see migration 008). It's left
+    // in 'draft' status with no issue/due date until it's reviewed and sent,
+    // so it never shows up as a live outstanding invoice before then.
+    let draftInvoiceId: string | null = null;
     try {
       const { data: products } = await supabase
         .from('products')
@@ -220,14 +223,12 @@ export async function POST(request: NextRequest) {
 
       const { data: settings } = await supabase
         .from('business_settings')
-        .select('id, quote_prefix, next_quote_number, default_quote_validity, default_terms')
+        .select('id, invoice_prefix, next_invoice_number, default_terms')
         .limit(1)
         .single();
 
       if (settings) {
-        const quoteNumber = `${settings.quote_prefix}-${settings.next_quote_number}`;
-        const validUntil = new Date();
-        validUntil.setDate(validUntil.getDate() + (settings.default_quote_validity || 30));
+        const invoiceNumber = `${settings.invoice_prefix}-${settings.next_invoice_number}`;
 
         const normalisedItems = normaliseItems(selected_items);
         const lineItems = normalisedItems.map((item) => {
@@ -269,16 +270,15 @@ export async function POST(request: NextRequest) {
           noteLines.push('', 'Customer notes:', additional_notes);
         }
 
-        const { data: quote, error: quoteErr } = await supabase
-          .from('quotes')
+        const { data: invoice, error: invoiceErr } = await supabase
+          .from('invoices')
           .insert({
-            quote_number: quoteNumber,
+            invoice_number: invoiceNumber,
             customer_id: customerId,
             title,
             event_date: event_date || null,
             event_location: event_location || null,
             line_items: lineItems,
-            photos: [],
             subtotal,
             discount_type: null,
             discount_value: 0,
@@ -288,35 +288,39 @@ export async function POST(request: NextRequest) {
             total,
             deposit_percentage: depositPct,
             deposit_amount: depositAmount,
+            amount_paid: 0,
+            balance_due: total,
+            payment_history: [],
             status: 'draft',
-            valid_until: validUntil.toISOString().split('T')[0],
+            issue_date: null,
+            due_date: null,
             notes: noteLines.join('\n'),
             terms: settings.default_terms,
           })
           .select('id')
           .single();
 
-        if (!quoteErr && quote) {
-          draftQuoteId = quote.id;
+        if (!invoiceErr && invoice) {
+          draftInvoiceId = invoice.id;
 
-          // Increment the quote number counter
+          // Increment the invoice number counter
           await supabase
             .from('business_settings')
-            .update({ next_quote_number: settings.next_quote_number + 1 })
+            .update({ next_invoice_number: settings.next_invoice_number + 1 })
             .eq('id', settings.id);
 
-          // Link the enquiry to the quote
+          // Link the enquiry to the invoice
           await supabase
             .from('website_enquiries')
-            .update({ quote_id: quote.id })
+            .update({ invoice_id: invoice.id })
             .eq('id', enquiry.id);
-        } else if (quoteErr) {
-          console.error('Failed to auto-create draft quote:', quoteErr.message);
+        } else if (invoiceErr) {
+          console.error('Failed to auto-create draft invoice:', invoiceErr.message);
         }
       }
-    } catch (quoteCreateErr) {
-      console.error('Draft quote creation error:', quoteCreateErr);
-      // Don't fail the enquiry if quote creation fails
+    } catch (invoiceCreateErr) {
+      console.error('Draft invoice creation error:', invoiceCreateErr);
+      // Don't fail the enquiry if invoice creation fails
     }
 
     // 4. Send notification email
@@ -343,7 +347,7 @@ export async function POST(request: NextRequest) {
     return Response.json({
       success: true,
       enquiry_id: enquiry.id,
-      draft_quote_id: draftQuoteId,
+      draft_invoice_id: draftInvoiceId,
       message: 'Enquiry received successfully',
     });
   } catch (error) {

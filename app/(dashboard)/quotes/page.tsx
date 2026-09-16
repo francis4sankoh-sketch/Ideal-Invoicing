@@ -2,15 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Quote, Customer, LineItem } from '@/types';
-import { formatCurrency, formatDateAU, generateId } from '@/lib/utils/format';
-import { FileText, Plus, Search, Trash2, Copy } from 'lucide-react';
+import { Quote, Customer } from '@/types';
+import { formatCurrency, formatDateAU } from '@/lib/utils/format';
+import { FileText, Search, Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 
 const STATUSES = ['all', 'draft', 'sent', 'accepted', 'rejected', 'expired'];
 
@@ -21,7 +19,6 @@ export default function QuotesPage() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const supabase = createClient();
-  const router = useRouter();
 
   useEffect(() => { loadQuotes(); }, []);
 
@@ -50,73 +47,6 @@ export default function QuotesPage() {
       return;
     }
     setQuotes((prev) => prev.filter((x) => x.id !== q.id));
-  };
-
-  const handleDuplicate = async (q: Quote & { customer?: Customer }) => {
-    setBusyId(q.id);
-    // Pull fresh settings to get next quote number
-    const { data: settings } = await supabase
-      .from('business_settings')
-      .select('*')
-      .limit(1)
-      .single();
-
-    const quoteNumber = settings
-      ? `${settings.quote_prefix}-${settings.next_quote_number}`
-      : `${q.quote_number}-COPY`;
-
-    const validUntil = new Date();
-    validUntil.setDate(validUntil.getDate() + (settings?.default_quote_validity || 30));
-
-    const freshLineItems: LineItem[] = (q.line_items || []).map((item) => ({
-      ...item,
-      id: generateId(),
-    }));
-
-    const payload = {
-      quote_number: quoteNumber,
-      customer_id: q.customer_id,
-      title: `${q.title} (Copy)`,
-      event_date: q.event_date,
-      event_location: q.event_location,
-      line_items: freshLineItems,
-      subtotal: q.subtotal,
-      discount_type: q.discount_type,
-      discount_value: q.discount_value,
-      discount_amount: q.discount_amount,
-      include_gst: q.include_gst,
-      gst_amount: q.gst_amount,
-      total: q.total,
-      deposit_percentage: q.deposit_percentage,
-      deposit_amount: q.deposit_amount,
-      status: 'draft' as const,
-      valid_until: validUntil.toISOString().split('T')[0],
-      notes: q.notes,
-      terms: q.terms,
-      converted_to_invoice: false,
-      invoice_id: null,
-    };
-
-    const { data: created, error } = await supabase
-      .from('quotes')
-      .insert(payload)
-      .select()
-      .single();
-    if (error) {
-      setBusyId(null);
-      alert(`Failed to duplicate quote: ${error.message}`);
-      return;
-    }
-
-    if (settings) {
-      await supabase
-        .from('business_settings')
-        .update({ next_quote_number: settings.next_quote_number + 1 })
-        .eq('id', settings.id);
-    }
-
-    setBusyId(null);
-    if (created) router.push(`/quotes/${created.id}`);
   };
 
   const filtered = quotes.filter((q) => {
@@ -190,20 +120,16 @@ export default function QuotesPage() {
             ))}
           </div>
         </div>
-        <Link href="/quotes/new">
-          <Button><Plus className="w-4 h-4" /> New Quote</Button>
-        </Link>
       </div>
 
       {filtered.length === 0 ? (
         <EmptyState
           icon={FileText}
           title="No quotes found"
-          description={statusFilter !== 'all' ? 'Try changing the filter.' : 'Create your first quote to get started.'}
-          action={
-            <Link href="/quotes/new">
-              <Button><Plus className="w-4 h-4" /> New Quote</Button>
-            </Link>
+          description={
+            statusFilter !== 'all'
+              ? 'Try changing the filter.'
+              : 'Quotes are kept for history — new bookings now start as an invoice.'
           }
         />
       ) : (
@@ -245,14 +171,6 @@ export default function QuotesPage() {
                     <td className="px-4 py-3 text-[var(--color-text-muted)]">{formatDateAU(q.created_at)}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => handleDuplicate(q)}
-                          disabled={busyId === q.id}
-                          title="Duplicate quote"
-                          className="p-1.5 rounded hover:bg-[var(--color-bg-light)] text-[var(--color-text-muted)] hover:text-[var(--color-primary)] disabled:opacity-50"
-                        >
-                          <Copy className="w-4 h-4" />
-                        </button>
                         <button
                           onClick={() => handleDelete(q)}
                           disabled={busyId === q.id || q.converted_to_invoice}

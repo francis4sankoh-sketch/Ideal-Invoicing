@@ -3,24 +3,34 @@
 import { useState, useEffect, use } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
-import { Input, Select } from '@/components/ui/input';
+import { Input, Textarea, Select } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
-import { Invoice, Customer, BusinessSettings, Expense, PaymentRecord, PAYMENT_METHODS } from '@/types';
-import { formatCurrency, formatDateAU, formatDateDocument } from '@/lib/utils/format';
-import { ArrowLeft, Send, Bell, DollarSign, Ban, Copy, TrendingUp, TrendingDown, Receipt, Plus, Trash2, Pencil, CheckCircle2 } from 'lucide-react';
+import { Invoice, Customer, LineItem, Product, BusinessSettings, Expense, PaymentRecord, PAYMENT_METHODS } from '@/types';
+import { formatCurrency, formatDateAU, formatDateDocument, generateId } from '@/lib/utils/format';
+import {
+  ArrowLeft, Send, Bell, DollarSign, Ban, Copy, TrendingUp, TrendingDown, Receipt,
+  Plus, Trash2, Pencil, CheckCircle2, Save, ChevronDown, ChevronUp, AlertTriangle,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PDFDownloadButton } from '@/components/pdf-download-button';
+import { LineItemPhotos } from '@/components/shared/line-item-photos';
+import { ProductPicker } from '@/components/shared/product-picker';
+import { deletePhotosForLineItems } from '@/lib/utils/photo-upload';
+import { cached, TTL } from '@/lib/utils/cache';
 
 export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const isNew = id === 'new';
   const supabase = createClient();
   const router = useRouter();
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [settings, setSettings] = useState<BusinessSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -32,6 +42,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [sendModalOpen, setSendModalOpen] = useState(false);
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
+  const [productPickerOpen, setProductPickerOpen] = useState(false);
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+  const [stockWarnings, setStockWarnings] = useState<string[]>([]);
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
 
@@ -42,13 +55,137 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     notes: '',
   });
 
+  const isDraftMode = isNew || invoice?.status === 'draft';
+
   useEffect(() => { loadData(); }, [id]);
 
+  // Stock/double-booking check — only meaningful while still building a draft.
+  useEffect(() => {
+    if (!isDraftMode || !invoice?.event_date || !invoice.line_items?.length || products.length === 0) {
+      setStockWarnings([]);
+      return;
+    }
+    checkAvailability();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDraftMode, invoice?.event_date, invoice?.line_items, products]);
+
+  const checkAvailability = async () => {
+    if (!invoice?.event_date) return;
+
+    const norm = (s: string) => s.toLowerCase().trim();
+    const tracked = new Map<string, { name: string; owned: number }>();
+    for (const p of products) {
+      if (p.quantity_owned != null) tracked.set(norm(p.name), { name: p.name, owned: p.quantity_owned });
+    }
+    if (tracked.size === 0) {
+      setStockWarnings([]);
+      return;
+    }
+
+    // Other bookings on the same event date: non-cancelled invoices + any still-open quotes
+    const [otherInvoicesRes, otherQuotesRes] = await Promise.all([
+      supabase
+        .from('invoices')
+        .select('id, invoice_number, line_items, status')
+        .eq('event_date', invoice.event_date)
+        .neq('status', 'cancelled')
+        .neq('id', invoice.id || '00000000-0000-0000-0000-000000000000'),
+      supabase
+        .from('quotes')
+        .select('id, quote_number, line_items')
+        .eq('event_date', invoice.event_date)
+        .eq('status', 'accepted'),
+    ]);
+
+    const committed = new Map<string, number>();
+    const addItems = (items: LineItem[] | undefined) => {
+      for (const li of items || []) {
+        const key = norm(li.description || '');
+        if (tracked.has(key)) committed.set(key, (committed.get(key) || 0) + (li.quantity || 0));
+      }
+    };
+    for (const inv of otherInvoicesRes.data || []) addItems(inv.line_items as LineItem[]);
+    for (const q of otherQuotesRes.data || []) addItems(q.line_items as LineItem[]);
+
+    const warnings: string[] = [];
+    for (const li of invoice.line_items) {
+      const key = norm(li.description || '');
+      const t = tracked.get(key);
+      if (!t) continue;
+      const already = committed.get(key) || 0;
+      const totalNeeded = already + (li.quantity || 0);
+      if (totalNeeded > t.owned) {
+        warnings.push(
+          `${t.name}: need ${totalNeeded} on ${formatDateAU(invoice.event_date)} (${already} already booked + ${li.quantity} here) but you only own ${t.owned}.`
+        );
+      }
+    }
+    setStockWarnings(warnings);
+  };
+
   const loadData = async () => {
+    const settingsResPromise = cached('business_settings', TTL.long, async () =>
+      supabase.from('business_settings').select('*').limit(1).single()
+    );
+
+    if (isNew) {
+      const [settingsRes, customersRes, productsData] = await Promise.all([
+        settingsResPromise,
+        supabase.from('customers').select('*').order('contact_name'),
+        cached('products_active', TTL.medium, async () => {
+          const { data } = await supabase.from('products').select('*').eq('is_active', true).order('name');
+          return data || [];
+        }),
+      ]);
+      setSettings(settingsRes.data);
+      setCustomers(customersRes.data || []);
+      setProducts(productsData);
+
+      const s = settingsRes.data;
+      const invoiceNum = s ? `${s.invoice_prefix}-${s.next_invoice_number}` : 'INV-1001';
+      setInvoice({
+        id: '',
+        invoice_number: invoiceNum,
+        quote_id: null,
+        customer_id: '',
+        title: '',
+        event_date: null,
+        event_location: null,
+        line_items: [],
+        subtotal: 0,
+        discount_type: null,
+        discount_value: 0,
+        discount_amount: 0,
+        include_gst: false,
+        gst_amount: 0,
+        total: 0,
+        deposit_percentage: 20,
+        deposit_amount: 0,
+        amount_paid: 0,
+        balance_due: 0,
+        payment_history: [],
+        status: 'draft',
+        issue_date: null,
+        due_date: null,
+        paid_date: null,
+        payment_method: null,
+        notes: null,
+        terms: s?.default_terms || null,
+        last_reminder_sent: null,
+        view_history: [],
+        last_viewed: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+      setLoading(false);
+      return;
+    }
+
     const [invRes, settingsRes] = await Promise.all([
       supabase.from('invoices').select('*').eq('id', id).single(),
-      supabase.from('business_settings').select('*').limit(1).single(),
+      settingsResPromise,
     ]);
+    setSettings(settingsRes.data);
 
     if (invRes.data) {
       setInvoice(invRes.data);
@@ -60,10 +197,251 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       ]);
       if (custRes.data) setCustomer(custRes.data);
       setExpenses(expensesRes.data || []);
+
+      // A draft needs the full customer list + product catalogue to keep editing
+      if (invRes.data.status === 'draft') {
+        const [customersRes, productsData] = await Promise.all([
+          supabase.from('customers').select('*').order('contact_name'),
+          cached('products_active', TTL.medium, async () => {
+            const { data } = await supabase.from('products').select('*').eq('is_active', true).order('name');
+            return data || [];
+          }),
+        ]);
+        setCustomers(customersRes.data || []);
+        setProducts(productsData);
+      }
     }
-    if (settingsRes.data) setSettings(settingsRes.data);
     setLoading(false);
   };
+
+  // ===== Draft builder: totals, line items =====
+
+  const recalculate = (items: LineItem[], discountType: string | null, discountValue: number, includeGst: boolean, depositPct: number) => {
+    const subtotal = items.reduce((s, i) => s + i.total, 0);
+    let discountAmount = 0;
+    if (discountType === 'percentage') discountAmount = subtotal * (discountValue / 100);
+    else if (discountType === 'fixed') discountAmount = discountValue;
+    const afterDiscount = subtotal - discountAmount;
+    const gstAmount = includeGst ? afterDiscount * 0.1 : 0;
+    const total = afterDiscount + gstAmount;
+    const depositAmount = total * (depositPct / 100);
+    return { subtotal, discount_amount: discountAmount, gst_amount: gstAmount, total, deposit_amount: depositAmount };
+  };
+
+  const updateInvoice = (updates: Partial<Invoice>) => {
+    if (!invoice) return;
+    const updated = { ...invoice, ...updates };
+    const calcs = recalculate(
+      updated.line_items,
+      updated.discount_type,
+      updated.discount_value,
+      updated.include_gst,
+      updated.deposit_percentage
+    );
+    // A draft never has payments recorded against it yet, so balance == total
+    setInvoice({ ...updated, ...calcs, balance_due: calcs.total });
+  };
+
+  const addLineItem = (product?: Product) => {
+    if (!invoice) return;
+    const item: LineItem = {
+      id: generateId(),
+      description: product?.name || '',
+      quantity: 1,
+      unit_price: product?.default_price || 0,
+      total: product?.default_price || 0,
+      notes: product?.description || '',
+      photos: product?.photos || [],
+    };
+    updateInvoice({ line_items: [...invoice.line_items, item] });
+  };
+
+  const updateLineItem = (itemId: string, field: keyof LineItem, value: string | number | string[]) => {
+    if (!invoice) return;
+    const items = invoice.line_items.map((item) => {
+      if (item.id !== itemId) return item;
+      const updated = { ...item, [field]: value };
+      if (field === 'quantity' || field === 'unit_price') {
+        updated.total = updated.quantity * updated.unit_price;
+      }
+      return updated;
+    });
+    updateInvoice({ line_items: items });
+  };
+
+  const removeLineItem = (itemId: string) => {
+    if (!invoice) return;
+    const removed = invoice.line_items.find((i) => i.id === itemId);
+    updateInvoice({ line_items: invoice.line_items.filter((i) => i.id !== itemId) });
+    if (removed?.photos?.length) {
+      deletePhotosForLineItems([removed], supabase).catch((err) =>
+        console.error('Photo cleanup failed:', err)
+      );
+    }
+  };
+
+  const toggleExpand = (itemId: string) => {
+    const next = new Set(expandedItems);
+    if (next.has(itemId)) next.delete(itemId);
+    else next.add(itemId);
+    setExpandedItems(next);
+  };
+
+  const handleSaveDraft = async () => {
+    if (!invoice) return;
+    if (!invoice.customer_id) {
+      alert('Please choose a customer before saving.');
+      return;
+    }
+    setSaving(true);
+
+    const payload = {
+      invoice_number: invoice.invoice_number,
+      customer_id: invoice.customer_id,
+      title: invoice.title?.trim() || 'Untitled Invoice',
+      event_date: invoice.event_date || null,
+      event_location: invoice.event_location || null,
+      line_items: invoice.line_items,
+      subtotal: invoice.subtotal,
+      discount_type: invoice.discount_type,
+      discount_value: invoice.discount_value,
+      discount_amount: invoice.discount_amount,
+      include_gst: invoice.include_gst,
+      gst_amount: invoice.gst_amount,
+      total: invoice.total,
+      deposit_percentage: invoice.deposit_percentage,
+      deposit_amount: invoice.deposit_amount,
+      balance_due: invoice.total,
+      status: 'draft' as const,
+      notes: invoice.notes,
+      terms: invoice.terms,
+    };
+
+    if (isNew) {
+      const { data, error } = await supabase.from('invoices').insert(payload).select().single();
+      if (error || !data) {
+        setSaving(false);
+        alert(`Failed to save invoice: ${error?.message || 'Unknown error'}`);
+        return;
+      }
+      if (settings) {
+        await supabase
+          .from('business_settings')
+          .update({ next_invoice_number: settings.next_invoice_number + 1 })
+          .eq('id', settings.id);
+      }
+      router.push(`/invoices/${data.id}`);
+    } else {
+      const { error } = await supabase.from('invoices').update(payload).eq('id', invoice.id);
+      if (error) {
+        setSaving(false);
+        alert(`Failed to save invoice: ${error.message}`);
+        return;
+      }
+      setInvoice({ ...invoice, ...payload });
+    }
+    setSaving(false);
+  };
+
+  // Transitions a draft to 'unpaid' and sends it — the first real send.
+  const handleSendDraft = async () => {
+    if (!invoice || isNew) return;
+    if (!invoice.customer_id) {
+      alert('Please choose a customer before sending.');
+      return;
+    }
+    if (!invoice.title?.trim()) {
+      alert('Please add a title before sending this invoice.');
+      return;
+    }
+    const cust = customers.find((c) => c.id === invoice.customer_id);
+    if (!cust) {
+      alert('Selected customer could not be found.');
+      return;
+    }
+    setSaving(true);
+
+    // Due date defaults to the event date — the balance is expected to be
+    // settled by the time the event happens. Falls back to the standard
+    // payment-terms window when there's no event date.
+    let dueDate: Date;
+    if (invoice.event_date) {
+      dueDate = new Date(invoice.event_date);
+    } else {
+      dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + (settings?.default_payment_terms || 14));
+    }
+    const issueDate = new Date().toISOString().split('T')[0];
+    const dueDateStr = dueDate.toISOString().split('T')[0];
+
+    const payload = {
+      customer_id: invoice.customer_id,
+      title: invoice.title.trim(),
+      event_date: invoice.event_date || null,
+      event_location: invoice.event_location || null,
+      line_items: invoice.line_items,
+      subtotal: invoice.subtotal,
+      discount_type: invoice.discount_type,
+      discount_value: invoice.discount_value,
+      discount_amount: invoice.discount_amount,
+      include_gst: invoice.include_gst,
+      gst_amount: invoice.gst_amount,
+      total: invoice.total,
+      deposit_percentage: invoice.deposit_percentage,
+      deposit_amount: invoice.deposit_amount,
+      balance_due: invoice.total,
+      notes: invoice.notes,
+      terms: invoice.terms,
+      status: 'unpaid' as const,
+      issue_date: issueDate,
+      due_date: dueDateStr,
+    };
+
+    const { error } = await supabase.from('invoices').update(payload).eq('id', invoice.id);
+    if (error) {
+      setSaving(false);
+      alert(`Failed to save invoice before sending: ${error.message}`);
+      return;
+    }
+
+    const updated = { ...invoice, ...payload };
+    setInvoice(updated);
+    setCustomer(cust);
+
+    const portalUrl = `${window.location.origin}/portal/${cust.portal_token}?invoice=${invoice.id}`;
+    const bankDetails = `
+      <div class="detail-row"><span class="detail-label">Bank:</span> <span class="detail-value">${settings?.bank_name || 'N/A'}</span></div>
+      <div class="detail-row"><span class="detail-label">Account Name:</span> <span class="detail-value">${settings?.account_name || 'N/A'}</span></div>
+      <div class="detail-row"><span class="detail-label">BSB:</span> <span class="detail-value">${settings?.bsb || 'N/A'}</span></div>
+      <div class="detail-row"><span class="detail-label">Account Number:</span> <span class="detail-value">${settings?.account_number || 'N/A'}</span></div>
+      ${settings?.bank_reference_note ? `<p style="margin-top:8px;font-size:12px;color:#555;">${settings.bank_reference_note}</p>` : ''}
+    `;
+
+    try {
+      await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'invoice_sent',
+          customerEmail: cust.email,
+          customerName: cust.contact_name,
+          invoiceNumber: invoice.invoice_number,
+          total: formatCurrency(updated.total),
+          balanceDue: formatCurrency(updated.total),
+          dueDate: formatDateDocument(dueDateStr),
+          bankDetails,
+          portalUrl,
+          subject: emailSubject,
+        }),
+      });
+      setSendModalOpen(false);
+    } catch (err) {
+      console.error('Failed to send invoice:', err);
+    }
+    setSaving(false);
+  };
+
+  // ===== Existing (sent/paid/etc.) invoice functionality — unchanged =====
 
   // Recompute amount_paid / balance_due / status from a payment_history array.
   const recomputeTotals = (history: PaymentRecord[]) => {
@@ -343,6 +721,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         .eq('id', invoice.quote_id);
     }
     await supabase.from('expenses').update({ invoice_id: null }).eq('invoice_id', invoice.id);
+    await deletePhotosForLineItems(invoice.line_items, supabase).catch((err) =>
+      console.error('Photo cleanup failed:', err)
+    );
     const { error } = await supabase.from('invoices').delete().eq('id', invoice.id);
     setSaving(false);
     if (error) {
@@ -365,6 +746,291 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     );
   }
 
+  // ===== Draft / new invoice: editable builder =====
+  if (isDraftMode) {
+    const selectedCustomer = customers.find((c) => c.id === invoice.customer_id);
+
+    return (
+      <div className="max-w-5xl mx-auto space-y-6 pb-24">
+        <Link href="/invoices" className="inline-flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+          <ArrowLeft className="w-4 h-4" /> Back to Invoices
+        </Link>
+
+        {/* Header */}
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-bold" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
+              {isNew ? 'New Invoice' : invoice.invoice_number}
+            </h2>
+            {!isNew && <Badge status={invoice.status} />}
+          </div>
+          {!isNew && (
+            <div className="flex gap-2 flex-wrap">
+              {settings && (
+                <PDFDownloadButton type="invoice" data={invoice} customer={selectedCustomer} settings={settings} />
+              )}
+              <Button variant="danger" size="sm" onClick={handleDelete} loading={saving}>
+                <Trash2 className="w-3.5 h-3.5" /> Delete
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setEmailSubject(`Invoice ${invoice.invoice_number} from Ideal Events Hire`);
+                  setSendModalOpen(true);
+                }}
+              >
+                <Send className="w-3.5 h-3.5" /> Send Invoice
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* Invoice Form */}
+        <Card>
+          <CardContent className="space-y-6 py-6">
+            {/* Header Fields */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <Input label="Invoice Number" value={invoice.invoice_number} disabled />
+              <div className="space-y-1">
+                <label className="block text-sm font-medium text-[var(--color-text)]">Customer *</label>
+                <select
+                  value={invoice.customer_id}
+                  onChange={(e) => updateInvoice({ customer_id: e.target.value })}
+                  className="w-full px-3 py-2 border border-[var(--color-border)] rounded-md text-sm bg-white dark:bg-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                >
+                  <option value="">Select customer...</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.contact_name} {c.business_name ? `(${c.business_name})` : ''} — {c.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Input label="Title *" value={invoice.title} onChange={(e) => updateInvoice({ title: e.target.value })} placeholder="e.g. Wedding Styling Package" />
+              <Input label="Event Date" type="date" value={invoice.event_date || ''} onChange={(e) => updateInvoice({ event_date: e.target.value || null })} />
+              <Input label="Event Location" value={invoice.event_location || ''} onChange={(e) => updateInvoice({ event_location: e.target.value || null })} />
+            </div>
+            <p className="text-xs text-[var(--color-text-muted)] -mt-3">
+              The due date is set automatically to the event date when you send this invoice.
+            </p>
+
+            {/* Line Items */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-[var(--color-text)]">Line Items</h3>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setProductPickerOpen(true)}>
+                    <Plus className="w-3 h-3" /> From Products
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => addLineItem()}>
+                    <Plus className="w-3 h-3" /> Manual Item
+                  </Button>
+                </div>
+              </div>
+
+              {stockWarnings.length > 0 && (
+                <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-900/10 p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <AlertTriangle className="w-4 h-4 text-amber-600" />
+                    <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+                      Possible double-booking
+                    </span>
+                  </div>
+                  <ul className="text-xs text-amber-700 dark:text-amber-300 space-y-1 list-disc pl-5">
+                    {stockWarnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {invoice.line_items.length === 0 ? (
+                <div className="text-center py-8 text-sm text-[var(--color-text-muted)] border border-dashed border-[var(--color-border)] rounded-lg">
+                  No items yet. Add items from products or manually.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {invoice.line_items.map((item, idx) => (
+                    <div key={item.id} className="border border-[var(--color-border)] rounded-lg p-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-xs text-[var(--color-text-muted)] mt-2 w-6">{idx + 1}.</span>
+                        <div className="flex-1 grid grid-cols-12 gap-3">
+                          <div className="col-span-12 md:col-span-5">
+                            <textarea
+                              value={item.description}
+                              onChange={(e) => updateLineItem(item.id, 'description', e.target.value)}
+                              placeholder="Description"
+                              rows={item.description.includes('\n') ? Math.min(item.description.split('\n').length + 1, 10) : 1}
+                              className="w-full px-3 py-2 border border-[var(--color-border)] rounded-md text-sm bg-white dark:bg-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] resize-y"
+                            />
+                          </div>
+                          <div className="col-span-4 md:col-span-2">
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => updateLineItem(item.id, 'quantity', parseInt(e.target.value) || 1)}
+                              placeholder="Qty"
+                              className="w-full px-3 py-2 border border-[var(--color-border)] rounded-md text-sm bg-white dark:bg-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                            />
+                          </div>
+                          <div className="col-span-4 md:col-span-2">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={item.unit_price}
+                              onChange={(e) => updateLineItem(item.id, 'unit_price', parseFloat(e.target.value) || 0)}
+                              placeholder="Unit Price"
+                              className="w-full px-3 py-2 border border-[var(--color-border)] rounded-md text-sm bg-white dark:bg-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                            />
+                          </div>
+                          <div className="col-span-3 md:col-span-2 flex items-center">
+                            <span className="text-sm font-medium">{formatCurrency(item.total)}</span>
+                          </div>
+                          <div className="col-span-1 flex items-center gap-1">
+                            <button onClick={() => toggleExpand(item.id)} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+                              {expandedItems.has(item.id) ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                            </button>
+                            <button onClick={() => removeLineItem(item.id)} className="text-red-400 hover:text-red-600">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {expandedItems.has(item.id) && (
+                        <div className="ml-9 mt-3 space-y-2">
+                          <textarea
+                            value={item.notes}
+                            onChange={(e) => updateLineItem(item.id, 'notes', e.target.value)}
+                            placeholder="Notes for this item..."
+                            rows={2}
+                            className="w-full px-3 py-2 border border-[var(--color-border)] rounded-md text-sm bg-white dark:bg-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                          />
+                          <LineItemPhotos
+                            lineItemId={item.id}
+                            photos={item.photos || []}
+                            onChange={(next) => updateLineItem(item.id, 'photos', next)}
+                            max={3}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Totals */}
+            <div className="flex justify-end">
+              <div className="w-full max-w-sm space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-[var(--color-text-muted)]">Subtotal</span>
+                  <span className="font-medium">{formatCurrency(invoice.subtotal)}</span>
+                </div>
+
+                {/* Discount */}
+                <div className="flex items-center gap-2">
+                  <select
+                    value={invoice.discount_type || ''}
+                    onChange={(e) => updateInvoice({ discount_type: (e.target.value || null) as Invoice['discount_type'] })}
+                    className="px-2 py-1.5 border border-[var(--color-border)] rounded text-xs bg-white dark:bg-[#1a1a1a]"
+                  >
+                    <option value="">No discount</option>
+                    <option value="percentage">% Discount</option>
+                    <option value="fixed">$ Discount</option>
+                  </select>
+                  {invoice.discount_type && (
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={invoice.discount_value}
+                      onChange={(e) => updateInvoice({ discount_value: parseFloat(e.target.value) || 0 })}
+                      className="w-20 px-2 py-1.5 border border-[var(--color-border)] rounded text-xs bg-white dark:bg-[#1a1a1a]"
+                    />
+                  )}
+                  {invoice.discount_amount > 0 && (
+                    <span className="text-sm text-red-500 ml-auto">-{formatCurrency(invoice.discount_amount)}</span>
+                  )}
+                </div>
+
+                {/* GST */}
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+                    <input
+                      type="checkbox"
+                      checked={invoice.include_gst}
+                      onChange={(e) => updateInvoice({ include_gst: e.target.checked })}
+                    />
+                    GST (10%)
+                  </label>
+                  {invoice.include_gst && <span className="text-sm">{formatCurrency(invoice.gst_amount)}</span>}
+                </div>
+
+                <div className="border-t border-[var(--color-border)] pt-2 flex justify-between">
+                  <span className="font-bold text-[var(--color-text)]">Total</span>
+                  <span className="font-bold text-lg text-[var(--color-primary)]">{formatCurrency(invoice.total)}</span>
+                </div>
+
+                <div className="flex items-center justify-between text-sm bg-[var(--color-accent-light)] p-3 rounded-md">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[var(--color-text-muted)]">Deposit</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={invoice.deposit_percentage}
+                      onChange={(e) => updateInvoice({ deposit_percentage: parseFloat(e.target.value) || 0 })}
+                      className="w-14 px-1 py-0.5 border border-[var(--color-border)] rounded text-xs text-center bg-white dark:bg-[#1a1a1a]"
+                    />
+                    <span className="text-xs text-[var(--color-text-muted)]">%</span>
+                  </div>
+                  <span className="font-bold text-[var(--color-primary)]">{formatCurrency(invoice.deposit_amount)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Notes & Terms */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Textarea label="Notes to Customer" rows={4} value={invoice.notes || ''} onChange={(e) => updateInvoice({ notes: e.target.value || null })} />
+              <Textarea label="Terms & Conditions" rows={4} value={invoice.terms || ''} onChange={(e) => updateInvoice({ terms: e.target.value || null })} />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Sticky Save Bar */}
+        <div className="fixed bottom-0 left-0 lg:left-60 right-0 bg-white dark:bg-[#1a1a1a] border-t border-[var(--color-border)] px-6 py-3 flex justify-end gap-3 z-30">
+          <Button variant="outline" onClick={handleSaveDraft} loading={saving}>
+            <Save className="w-4 h-4" /> Save Draft
+          </Button>
+        </div>
+
+        {/* Send Invoice Modal */}
+        <Modal open={sendModalOpen} onClose={() => setSendModalOpen(false)} title="Send Invoice">
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--color-text-muted)]">Sending to: <strong>{selectedCustomer?.email}</strong></p>
+            <Input label="Subject" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} />
+          </div>
+          <div className="flex justify-end gap-3 mt-6">
+            <Button variant="outline" onClick={() => setSendModalOpen(false)}>Cancel</Button>
+            <Button onClick={handleSendDraft} loading={saving}>
+              <Send className="w-4 h-4" /> Send Invoice
+            </Button>
+          </div>
+        </Modal>
+
+        {/* Product Picker Modal */}
+        <ProductPicker
+          open={productPickerOpen}
+          onClose={() => setProductPickerOpen(false)}
+          products={products}
+          onSelect={(p) => addLineItem(p)}
+        />
+      </div>
+    );
+  }
+
+  // ===== Sent / paid / cancelled invoice: read-only display + payment tracking =====
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <Link href="/invoices" className="inline-flex items-center gap-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]">

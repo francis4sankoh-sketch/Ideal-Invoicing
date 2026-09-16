@@ -7,7 +7,7 @@ import { useTheme } from '@/components/shared/theme-provider';
 const pageTitles: Record<string, string> = {
   '/': 'Dashboard',
   '/customers': 'Customers',
-  '/quotes': 'Quotes',
+  '/quotes': 'Quote History',
   '/invoices': 'Invoices',
   '/calendar': 'Calendar',
   '/run-sheet': 'Run Sheet',

@@ -85,7 +85,7 @@ export default function DashboardPage() {
     upcomingEventsCount: 0,
     newEnquiries: 0,
   });
-  const [recentQuotes, setRecentQuotes] = useState<Array<{ id: string; quote_number: string; title: string; status: string; total: number; created_at: string }>>([]);
+  const [recentInvoices, setRecentInvoices] = useState<Array<{ id: string; invoice_number: string; title: string; status: string; total: number; created_at: string }>>([]);
   const [recentPayments, setRecentPayments] = useState<Array<{ id: string; invoice_number: string; title: string; amount_paid: number; total: number }>>([]);
   const [eventProfits, setEventProfits] = useState<EventProfit[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
@@ -139,7 +139,7 @@ export default function DashboardPage() {
 
     const [
       invoicesRes,
-      recentQuotesRes,
+      recentInvoicesRes,
       paidInvoicesRes,
       expensesRes,
       profitInvoicesRes,
@@ -148,15 +148,15 @@ export default function DashboardPage() {
       upcomingQuotesRes,
       overdueRes,
     ] = await Promise.all([
-      supabase.from('invoices').select('total, amount_paid, balance_due, status, paid_date, due_date'),
-      supabase.from('quotes').select('id, quote_number, title, status, total, created_at').order('created_at', { ascending: false }).limit(5),
+      supabase.from('invoices').select('total, amount_paid, balance_due, status, paid_date, due_date').neq('status', 'draft'),
+      supabase.from('invoices').select('id, invoice_number, title, status, total, created_at').order('created_at', { ascending: false }).limit(5),
       supabase.from('invoices').select('id, invoice_number, title, amount_paid, total').gt('amount_paid', 0).order('updated_at', { ascending: false }).limit(5),
       supabase.from('expenses').select('amount, date, invoice_id'),
-      supabase.from('invoices').select('id, invoice_number, title, event_date, total, amount_paid, customer:customers(contact_name)').not('event_date', 'is', null).order('event_date', { ascending: false }).limit(10),
+      supabase.from('invoices').select('id, invoice_number, title, event_date, total, amount_paid, customer:customers(contact_name)').not('event_date', 'is', null).neq('status', 'draft').order('event_date', { ascending: false }).limit(10),
       supabase.from('website_enquiries').select('id').eq('status', 'new'),
-      // Upcoming events from invoices (next 30 days)
-      supabase.from('invoices').select('id, invoice_number, title, event_date, event_location, total, balance_due, status, customer:customers(contact_name)').gte('event_date', today).lte('event_date', next30Days).order('event_date', { ascending: true }),
-      // Upcoming events from quotes without invoices (next 30 days)
+      // Upcoming events from invoices (next 30 days) — exclude drafts, they haven't been sent yet
+      supabase.from('invoices').select('id, invoice_number, title, event_date, event_location, total, balance_due, status, customer:customers(contact_name)').gte('event_date', today).lte('event_date', next30Days).neq('status', 'draft').order('event_date', { ascending: true }),
+      // Upcoming events from quotes without invoices (next 30 days) — any still-open legacy quotes
       supabase.from('quotes').select('id, quote_number, title, event_date, event_location, total, status, customer:customers(contact_name)').gte('event_date', today).lte('event_date', next30Days).is('invoice_id', null).order('event_date', { ascending: true }),
       // Overdue invoices
       supabase.from('invoices').select('id, invoice_number, title, due_date, balance_due, total, customer:customers(contact_name)').eq('status', 'overdue').order('due_date', { ascending: true }),
@@ -268,7 +268,7 @@ export default function DashboardPage() {
     setEventProfits(eventProfitData);
     setUpcomingEvents(allUpcoming);
     setOverdueInvoices(overdueList);
-    setRecentQuotes(recentQuotesRes.data || []);
+    setRecentInvoices(recentInvoicesRes.data || []);
     setRecentPayments(paidInvoicesRes.data || []);
     setLoading(false);
   };
@@ -297,8 +297,8 @@ export default function DashboardPage() {
     <div className="space-y-6">
       {/* Quick Actions */}
       <div className="flex gap-3 flex-wrap">
-        <Link href="/quotes/new">
-          <Button><Plus className="w-4 h-4" /> New Quote</Button>
+        <Link href="/invoices/new">
+          <Button><Plus className="w-4 h-4" /> New Invoice</Button>
         </Link>
         <Link href="/customers">
           <Button variant="outline"><Plus className="w-4 h-4" /> New Customer</Button>
@@ -506,30 +506,30 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Recent Quotes */}
+        {/* Recent Invoices */}
         <Card>
           <div className="px-6 py-4 border-b border-[var(--color-border)] flex items-center justify-between">
             <h3 className="font-bold text-[var(--color-text)]" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
-              Recent Quotes
+              Recent Invoices
             </h3>
-            <Link href="/quotes" className="text-xs text-[var(--color-primary)] hover:underline flex items-center gap-1">
+            <Link href="/invoices" className="text-xs text-[var(--color-primary)] hover:underline flex items-center gap-1">
               View all <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           <CardContent className="p-0">
-            {recentQuotes.length === 0 ? (
-              <p className="text-sm text-[var(--color-text-muted)] p-6">No quotes yet</p>
+            {recentInvoices.length === 0 ? (
+              <p className="text-sm text-[var(--color-text-muted)] p-6">No invoices yet</p>
             ) : (
               <div className="divide-y divide-[var(--color-border)]">
-                {recentQuotes.map((q) => (
-                  <Link key={q.id} href={`/quotes/${q.id}`} className="flex items-center justify-between px-6 py-3 hover:bg-[var(--color-bg-light)] transition-colors">
+                {recentInvoices.map((inv) => (
+                  <Link key={inv.id} href={`/invoices/${inv.id}`} className="flex items-center justify-between px-6 py-3 hover:bg-[var(--color-bg-light)] transition-colors">
                     <div>
-                      <p className="text-sm font-medium text-[var(--color-text)]">{q.quote_number} — {q.title}</p>
-                      <p className="text-xs text-[var(--color-text-muted)]">{formatDateAU(q.created_at)}</p>
+                      <p className="text-sm font-medium text-[var(--color-text)]">{inv.invoice_number} — {inv.title}</p>
+                      <p className="text-xs text-[var(--color-text-muted)]">{formatDateAU(inv.created_at)}</p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="text-sm font-medium">{formatCurrency(q.total)}</span>
-                      <Badge status={q.status} />
+                      <span className="text-sm font-medium">{formatCurrency(inv.total)}</span>
+                      <Badge status={inv.status} />
                     </div>
                   </Link>
                 ))}

@@ -24,6 +24,7 @@ import {
 
 type EnquiryRow = WebsiteEnquiry & {
   quote?: { id: string; quote_number: string; status: string; total: number } | null;
+  invoice?: { id: string; invoice_number: string; status: string; total: number } | null;
 };
 
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
@@ -48,7 +49,7 @@ export default function EnquiriesPage() {
     setLoading(true);
     const { data } = await supabase
       .from('website_enquiries')
-      .select('*, quote:quotes(id, quote_number, status, total)')
+      .select('*, quote:quotes(id, quote_number, status, total), invoice:invoices(id, invoice_number, status, total)')
       .order('created_at', { ascending: false });
     setEnquiries((data as EnquiryRow[]) || []);
     setLoading(false);
@@ -160,7 +161,15 @@ export default function EnquiriesPage() {
                   </div>
 
                   <div className="flex gap-2 flex-wrap">
-                    {enq.quote?.id && (
+                    {enq.invoice?.id && (
+                      <Link href={`/invoices/${enq.invoice.id}`}>
+                        <Button variant="outline" size="sm">
+                          <FileText className="w-4 h-4" /> {enq.invoice.invoice_number}
+                          <ExternalLink className="w-3 h-3" />
+                        </Button>
+                      </Link>
+                    )}
+                    {!enq.invoice?.id && enq.quote?.id && (
                       <Link href={`/quotes/${enq.quote.id}`}>
                         <Button variant="outline" size="sm">
                           <FileText className="w-4 h-4" /> {enq.quote.quote_number}
@@ -278,8 +287,24 @@ export default function EnquiriesPage() {
                   </div>
                 )}
 
-                {/* Linked quote summary */}
-                {enq.quote && (
+                {/* Linked quote/invoice summary */}
+                {enq.invoice ? (
+                  <div className="mt-4 border-t border-[var(--color-border)] pt-3 flex items-center justify-between text-sm">
+                    <span className="text-[var(--color-text-muted)]">
+                      Linked invoice:{' '}
+                      <Link
+                        href={`/invoices/${enq.invoice.id}`}
+                        className="text-[var(--color-primary)] hover:underline"
+                      >
+                        {enq.invoice.invoice_number}
+                      </Link>{' '}
+                      ({enq.invoice.status})
+                    </span>
+                    <span className="font-medium">
+                      ${Number(enq.invoice.total || 0).toFixed(2)}
+                    </span>
+                  </div>
+                ) : enq.quote ? (
                   <div className="mt-4 border-t border-[var(--color-border)] pt-3 flex items-center justify-between text-sm">
                     <span className="text-[var(--color-text-muted)]">
                       Linked quote:{' '}
@@ -295,7 +320,7 @@ export default function EnquiriesPage() {
                       ${Number(enq.quote.total || 0).toFixed(2)}
                     </span>
                   </div>
-                )}
+                ) : null}
               </CardContent>
             </Card>
           ))}

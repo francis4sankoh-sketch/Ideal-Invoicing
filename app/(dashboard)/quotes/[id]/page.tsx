@@ -12,11 +12,12 @@ import { Quote, Customer, LineItem, BusinessSettings, Product, QuoteMessage } fr
 import { formatCurrency, formatDateAU, generateId } from '@/lib/utils/format';
 import {
   ArrowLeft, Plus, Trash2, Save, Send, FileDown, Copy, ArrowRightLeft,
-  MessageCircle, ChevronDown, ChevronUp, Upload, Package, CheckCircle2, CopyPlus, AlertTriangle, Search
+  MessageCircle, ChevronDown, ChevronUp, Upload, CheckCircle2, CopyPlus, AlertTriangle
 } from 'lucide-react';
 import Link from 'next/link';
 import { PDFDownloadButton } from '@/components/pdf-download-button';
 import { LineItemPhotos } from '@/components/shared/line-item-photos';
+import { ProductPicker } from '@/components/shared/product-picker';
 import { deletePhotosForLineItems } from '@/lib/utils/photo-upload';
 import { cached, invalidate, TTL } from '@/lib/utils/cache';
 
@@ -35,7 +36,6 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
   const [saving, setSaving] = useState(false);
   const [sendModalOpen, setSendModalOpen] = useState(false);
   const [productPickerOpen, setProductPickerOpen] = useState(false);
-  const [productSearch, setProductSearch] = useState('');
   const [messageText, setMessageText] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
@@ -889,63 +889,12 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
       </Modal>
 
       {/* Product Picker Modal */}
-      <Modal
+      <ProductPicker
         open={productPickerOpen}
-        onClose={() => { setProductPickerOpen(false); setProductSearch(''); }}
-        title="Add from Products"
-        size="lg"
-      >
-        <div className="relative mb-3">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
-          <input
-            type="text"
-            autoFocus
-            placeholder="Search products by name or category..."
-            value={productSearch}
-            onChange={(e) => setProductSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 border border-[var(--color-border)] rounded-md text-sm bg-white dark:bg-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
-          />
-        </div>
-        {(() => {
-          const q = productSearch.trim().toLowerCase();
-          const filteredProducts = q
-            ? products.filter(
-                (p) =>
-                  p.name.toLowerCase().includes(q) ||
-                  (p.category || '').toLowerCase().includes(q) ||
-                  (p.description || '').toLowerCase().includes(q)
-              )
-            : products;
-          return filteredProducts.length === 0 ? (
-            <p className="text-sm text-[var(--color-text-muted)] text-center py-8">
-              No products match &ldquo;{productSearch}&rdquo;.
-            </p>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-96 overflow-y-auto">
-              {filteredProducts.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => { addLineItem(p); setProductPickerOpen(false); setProductSearch(''); }}
-                  className="flex items-center gap-3 p-3 border border-[var(--color-border)] rounded-lg hover:bg-[var(--color-bg-light)] transition-colors text-left"
-                >
-                  <div className="w-12 h-12 bg-[var(--color-bg-light)] rounded flex items-center justify-center shrink-0">
-                    {p.photos?.[0] ? (
-                      <img src={p.photos[0]} alt="" className="w-full h-full object-cover rounded" />
-                    ) : (
-                      <Package className="w-5 h-5 text-[var(--color-text-muted)]" />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{p.name}</p>
-                    {p.category && <p className="text-xs text-[var(--color-text-muted)] truncate">{p.category}</p>}
-                    <p className="text-sm text-[var(--color-primary)] font-bold">{formatCurrency(p.default_price)}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          );
-        })()}
-      </Modal>
+        onClose={() => setProductPickerOpen(false)}
+        products={products}
+        onSelect={(p) => addLineItem(p)}
+      />
     </div>
   );
 }

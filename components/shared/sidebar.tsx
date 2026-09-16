@@ -25,7 +25,7 @@ const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/enquiries', label: 'Enquiries', icon: Mail },
   { href: '/customers', label: 'Customers', icon: Users },
-  { href: '/quotes', label: 'Quotes', icon: FileText },
+  { href: '/quotes', label: 'Quote History', icon: FileText },
   { href: '/invoices', label: 'Invoices', icon: Receipt },
   { href: '/calendar', label: 'Calendar', icon: Calendar },
   { href: '/run-sheet', label: 'Run Sheet', icon: Truck },

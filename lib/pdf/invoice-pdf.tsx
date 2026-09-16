@@ -220,6 +220,14 @@ export function InvoicePDF({ invoice, settings }: InvoicePDFProps) {
           </View>
         ) : null}
 
+        {/* Terms */}
+        {invoice.terms ? (
+          <View>
+            <Text style={styles.sectionTitle}>Terms & Conditions</Text>
+            <Text style={styles.sectionText}>{invoice.terms}</Text>
+          </View>
+        ) : null}
+
         {/* Footer */}
         <Text style={styles.footer} fixed>
           {settings.business_name}{settings.email ? ` | ${settings.email}` : ''}{settings.phone ? ` | ${settings.phone}` : ''}{settings.website ? ` | ${settings.website}` : ''}
@@ -231,6 +239,7 @@ export function InvoicePDF({ invoice, settings }: InvoicePDFProps) {
 
 function getInvoiceStatusColor(status: string): string {
   const colors: Record<string, string> = {
+    draft: '#6b7280',
     unpaid: '#eab308',
     partially_paid: '#2563eb',
     paid: '#16a34a',

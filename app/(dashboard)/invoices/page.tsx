@@ -8,11 +8,11 @@ import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Invoice, Customer } from '@/types';
 import { formatCurrency, formatDateAU } from '@/lib/utils/format';
-import { Receipt, Search, Trash2, FileSpreadsheet } from 'lucide-react';
+import { Receipt, Search, Trash2, FileSpreadsheet, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { buildXeroInvoiceCsv, downloadCsv, type InvoiceForExport } from '@/lib/utils/xero-export';
 
-const STATUSES = ['all', 'unpaid', 'partially_paid', 'paid', 'overdue', 'cancelled'];
+const STATUSES = ['all', 'draft', 'unpaid', 'partially_paid', 'paid', 'overdue', 'cancelled'];
 
 export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<(Invoice & { customer?: Customer })[]>([]);
@@ -72,7 +72,7 @@ export default function InvoicesPage() {
   });
 
   const handleXeroExport = () => {
-    const exportable = filtered.filter((inv) => inv.status !== 'cancelled') as InvoiceForExport[];
+    const exportable = filtered.filter((inv) => inv.status !== 'cancelled' && inv.status !== 'draft') as InvoiceForExport[];
     if (exportable.length === 0) {
       alert('No invoices to export for the current filter.');
       return;
@@ -120,16 +120,26 @@ export default function InvoicesPage() {
             ))}
           </div>
         </div>
-        <Button variant="outline" onClick={handleXeroExport} title="Download the listed invoices as a Xero-importable CSV">
-          <FileSpreadsheet className="w-4 h-4" /> Export to Xero
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleXeroExport} title="Download the listed invoices as a Xero-importable CSV">
+            <FileSpreadsheet className="w-4 h-4" /> Export to Xero
+          </Button>
+          <Link href="/invoices/new">
+            <Button><Plus className="w-4 h-4" /> New Invoice</Button>
+          </Link>
+        </div>
       </div>
 
       {filtered.length === 0 ? (
         <EmptyState
           icon={Receipt}
           title="No invoices found"
-          description={statusFilter !== 'all' ? 'Try changing the filter.' : 'Invoices are created by converting accepted quotes.'}
+          description={statusFilter !== 'all' ? 'Try changing the filter.' : 'Create your first invoice to get started.'}
+          action={
+            <Link href="/invoices/new">
+              <Button><Plus className="w-4 h-4" /> New Invoice</Button>
+            </Link>
+          }
         />
       ) : (
         <Card>

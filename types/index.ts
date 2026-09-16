@@ -72,7 +72,10 @@ export interface Invoice {
   event_location: string | null;
   line_items: LineItem[];
   subtotal: number;
+  discount_type: 'percentage' | 'fixed' | null;
+  discount_value: number;
   discount_amount: number;
+  include_gst: boolean;
   gst_amount: number;
   total: number;
   deposit_percentage: number;
@@ -80,12 +83,13 @@ export interface Invoice {
   amount_paid: number;
   balance_due: number;
   payment_history: PaymentRecord[];
-  status: 'unpaid' | 'partially_paid' | 'paid' | 'overdue' | 'cancelled';
+  status: 'draft' | 'unpaid' | 'partially_paid' | 'paid' | 'overdue' | 'cancelled';
   issue_date: string | null;
   due_date: string | null;
   paid_date: string | null;
   payment_method: string | null;
   notes: string | null;
+  terms: string | null;
   last_reminder_sent: string | null;
   view_history: string[];
   last_viewed: string | null;
@@ -233,6 +237,7 @@ export interface WebsiteEnquiry {
   id: string;
   customer_id: string | null;
   quote_id: string | null;
+  invoice_id: string | null;
   name: string;
   email: string;
   phone: string | null;
