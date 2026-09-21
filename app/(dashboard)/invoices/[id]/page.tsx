@@ -11,13 +11,14 @@ import { Invoice, Customer, LineItem, Product, BusinessSettings, Expense, Paymen
 import { formatCurrency, formatDateAU, formatDateDocument, generateId } from '@/lib/utils/format';
 import {
   ArrowLeft, Send, Bell, DollarSign, Ban, Copy, TrendingUp, TrendingDown, Receipt,
-  Plus, Trash2, Pencil, CheckCircle2, Save, ChevronDown, ChevronUp, AlertTriangle,
+  Plus, Trash2, Pencil, CheckCircle2, Save, ChevronDown, ChevronUp, AlertTriangle, UserPlus,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PDFDownloadButton } from '@/components/pdf-download-button';
 import { LineItemPhotos } from '@/components/shared/line-item-photos';
 import { ProductPicker } from '@/components/shared/product-picker';
+import { QuickAddCustomer } from '@/components/shared/quick-add-customer';
 import { deletePhotosForLineItems } from '@/lib/utils/photo-upload';
 import { cached, TTL } from '@/lib/utils/cache';
 
@@ -43,6 +44,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
   const [productPickerOpen, setProductPickerOpen] = useState(false);
+  const [quickAddCustomerOpen, setQuickAddCustomerOpen] = useState(false);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [stockWarnings, setStockWarnings] = useState<string[]>([]);
 
@@ -792,7 +794,16 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <Input label="Invoice Number" value={invoice.invoice_number} disabled />
               <div className="space-y-1">
-                <label className="block text-sm font-medium text-[var(--color-text)]">Customer *</label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-medium text-[var(--color-text)]">Customer *</label>
+                  <button
+                    type="button"
+                    onClick={() => setQuickAddCustomerOpen(true)}
+                    className="inline-flex items-center gap-1 text-xs text-[var(--color-primary)] hover:underline"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" /> New customer
+                  </button>
+                </div>
                 <select
                   value={invoice.customer_id}
                   onChange={(e) => updateInvoice({ customer_id: e.target.value })}
@@ -1025,6 +1036,16 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           onClose={() => setProductPickerOpen(false)}
           products={products}
           onSelect={(p) => addLineItem(p)}
+        />
+
+        {/* Quick Add Customer Modal */}
+        <QuickAddCustomer
+          open={quickAddCustomerOpen}
+          onClose={() => setQuickAddCustomerOpen(false)}
+          onCreated={(newCustomer) => {
+            setCustomers((prev) => [...prev, newCustomer].sort((a, b) => a.contact_name.localeCompare(b.contact_name)));
+            updateInvoice({ customer_id: newCustomer.id });
+          }}
         />
       </div>
     );
