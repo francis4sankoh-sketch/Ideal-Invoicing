@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Sidebar } from '@/components/shared/sidebar';
 import { Topbar } from '@/components/shared/topbar';
+import { EmailHealthBanner } from '@/components/shared/email-health-banner';
 import { createClient } from '@/lib/supabase/client';
 
 export default function DashboardLayout({
@@ -30,6 +31,7 @@ export default function DashboardLayout({
 
       <div className="flex flex-col flex-1 lg:ml-60 min-h-0 min-w-0 print:ml-0">
         <Topbar onMenuClick={() => setSidebarOpen(true)} />
+        <EmailHealthBanner />
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 bg-[var(--color-bg-light)] p-4 md:p-8 print:overflow-visible print:p-0 print:bg-white">
           {children}

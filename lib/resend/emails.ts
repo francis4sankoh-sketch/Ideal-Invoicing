@@ -4,7 +4,7 @@ function getResend() {
   return new Resend(process.env.RESEND_API_KEY);
 }
 
-const FROM_EMAIL = 'Ideal Events Hire <info@idealeventshire.com.au>';
+export const FROM_EMAIL = 'Ideal Events Hire <info@idealeventshire.com.au>';
 const BUSINESS_EMAILS = ['info@idealeventshire.com.au'];
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
