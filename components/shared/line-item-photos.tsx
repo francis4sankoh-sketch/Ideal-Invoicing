@@ -16,6 +16,8 @@ interface LineItemPhotosProps {
   onChange: (next: string[]) => void;
   max?: number;
   disabled?: boolean;
+  // When set, the parent decides when the file is deleted from storage
+  onPhotoRemoved?: (url: string) => void;
 }
 
 export function LineItemPhotos({
@@ -24,6 +26,7 @@ export function LineItemPhotos({
   onChange,
   max = 3,
   disabled = false,
+  onPhotoRemoved,
 }: LineItemPhotosProps) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +66,10 @@ export function LineItemPhotos({
   const handleRemove = async (url: string) => {
     // Optimistic update
     onChange(photos.filter((p) => p !== url));
+    if (onPhotoRemoved) {
+      onPhotoRemoved(url);
+      return;
+    }
     try {
       await deletePhotoByUrl(url, supabase);
     } catch (err) {

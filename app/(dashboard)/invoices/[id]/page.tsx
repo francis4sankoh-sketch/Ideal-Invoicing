@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect, useRef, use } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea, Select } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
-import { Invoice, Customer, LineItem, Product, BusinessSettings, Expense, PaymentRecord, PAYMENT_METHODS } from '@/types';
+import { Invoice, Customer, LineItem, Product, BusinessSettings, Expense, PaymentRecord, Appointment, PAYMENT_METHODS } from '@/types';
 import { formatCurrency, formatDateAU, formatDateDocument, generateId } from '@/lib/utils/format';
 import {
   ArrowLeft, Send, Bell, DollarSign, Ban, Copy, TrendingUp, TrendingDown, Receipt,
@@ -21,6 +21,15 @@ import { ProductPicker } from '@/components/shared/product-picker';
 import { QuickAddCustomer } from '@/components/shared/quick-add-customer';
 import { deletePhotosForLineItems } from '@/lib/utils/photo-upload';
 import { cached, TTL } from '@/lib/utils/cache';
+import {
+  recalculateTotals as recalculate,
+  normalizeForEditing,
+  totalsMismatch,
+  mismatchSummary,
+  settleAfterEdit,
+  localDate,
+  moveToDate,
+} from '@/lib/utils/invoice-edit';
 
 export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -47,6 +56,12 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const [quickAddCustomerOpen, setQuickAddCustomerOpen] = useState(false);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [stockWarnings, setStockWarnings] = useState<string[]>([]);
+  // Editing an invoice that's already been sent: the snapshot is what Cancel restores
+  const [editingSent, setEditingSent] = useState(false);
+  const [editSnapshot, setEditSnapshot] = useState<{ invoice: Invoice; customer: Customer | null } | null>(null);
+  const [justSaved, setJustSaved] = useState<string | null>(null);
+  const editBaseline = useRef('');
+  const pendingPhotoDeletes = useRef<string[]>([]);
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
 
@@ -58,18 +73,19 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   });
 
   const isDraftMode = isNew || invoice?.status === 'draft';
+  const isBuilderMode = isDraftMode || editingSent;
 
   useEffect(() => { loadData(); }, [id]);
 
-  // Stock/double-booking check — only meaningful while still building a draft.
+  // Stock/double-booking check — only meaningful while building a draft or editing a sent invoice.
   useEffect(() => {
-    if (!isDraftMode || !invoice?.event_date || !invoice.line_items?.length || products.length === 0) {
+    if (!isBuilderMode || !invoice?.event_date || !invoice.line_items?.length || products.length === 0) {
       setStockWarnings([]);
       return;
     }
     checkAvailability();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDraftMode, invoice?.event_date, invoice?.line_items, products]);
+  }, [isBuilderMode, invoice?.event_date, invoice?.line_items, products]);
 
   const checkAvailability = async () => {
     if (!invoice?.event_date) return;
@@ -123,6 +139,20 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       }
     }
     setStockWarnings(warnings);
+  };
+
+  // The customer list + product catalogue the builder needs. Returns false if the customers didn't load.
+  const loadBuilderLists = async () => {
+    const [customersRes, productsData] = await Promise.all([
+      supabase.from('customers').select('*').order('contact_name'),
+      cached('products_active', TTL.medium, async () => {
+        const { data } = await supabase.from('products').select('*').eq('is_active', true).order('name');
+        return data || [];
+      }),
+    ]);
+    setCustomers(customersRes.data || []);
+    setProducts(productsData);
+    return !customersRes.error;
   };
 
   const loadData = async () => {
@@ -201,34 +231,12 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       setExpenses(expensesRes.data || []);
 
       // A draft needs the full customer list + product catalogue to keep editing
-      if (invRes.data.status === 'draft') {
-        const [customersRes, productsData] = await Promise.all([
-          supabase.from('customers').select('*').order('contact_name'),
-          cached('products_active', TTL.medium, async () => {
-            const { data } = await supabase.from('products').select('*').eq('is_active', true).order('name');
-            return data || [];
-          }),
-        ]);
-        setCustomers(customersRes.data || []);
-        setProducts(productsData);
-      }
+      if (invRes.data.status === 'draft') await loadBuilderLists();
     }
     setLoading(false);
   };
 
   // ===== Draft builder: totals, line items =====
-
-  const recalculate = (items: LineItem[], discountType: string | null, discountValue: number, includeGst: boolean, depositPct: number) => {
-    const subtotal = items.reduce((s, i) => s + i.total, 0);
-    let discountAmount = 0;
-    if (discountType === 'percentage') discountAmount = subtotal * (discountValue / 100);
-    else if (discountType === 'fixed') discountAmount = discountValue;
-    const afterDiscount = subtotal - discountAmount;
-    const gstAmount = includeGst ? afterDiscount * 0.1 : 0;
-    const total = afterDiscount + gstAmount;
-    const depositAmount = total * (depositPct / 100);
-    return { subtotal, discount_amount: discountAmount, gst_amount: gstAmount, total, deposit_amount: depositAmount };
-  };
 
   const updateInvoice = (updates: Partial<Invoice>) => {
     if (!invoice) return;
@@ -240,8 +248,8 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       updated.include_gst,
       updated.deposit_percentage
     );
-    // A draft never has payments recorded against it yet, so balance == total
-    setInvoice({ ...updated, ...calcs, balance_due: calcs.total });
+    // A draft has no payments, so balance == total. A sent invoice keeps the payments already recorded.
+    setInvoice({ ...updated, ...calcs, balance_due: Math.max(0, calcs.total - (updated.amount_paid || 0)) });
   };
 
   const addLineItem = (product?: Product) => {
@@ -276,9 +284,14 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     const removed = invoice.line_items.find((i) => i.id === itemId);
     updateInvoice({ line_items: invoice.line_items.filter((i) => i.id !== itemId) });
     if (removed?.photos?.length) {
-      deletePhotosForLineItems([removed], supabase).catch((err) =>
-        console.error('Photo cleanup failed:', err)
-      );
+      if (editingSent) {
+        // Held back until the edit is saved, so Cancel can't leave the invoice pointing at deleted photos
+        pendingPhotoDeletes.current.push(...removed.photos);
+      } else {
+        deletePhotosForLineItems([removed], supabase).catch((err) =>
+          console.error('Photo cleanup failed:', err)
+        );
+      }
     }
   };
 
@@ -492,6 +505,170 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       invoice_id: invoice.id,
       notes: 'Auto-created when deposit was paid.',
     });
+  };
+
+  // ===== Editing an invoice that has already been sent =====
+
+  const startEditing = async () => {
+    if (!invoice || invoice.status === 'cancelled') return;
+
+    let working = normalizeForEditing(invoice);
+    const calcs = recalculate(
+      working.line_items,
+      working.discount_type,
+      working.discount_value,
+      working.include_gst,
+      working.deposit_percentage
+    );
+    if (totalsMismatch(invoice, calcs)) {
+      const proceed = confirm(
+        `On ${invoice.invoice_number}, ${mismatchSummary(invoice, calcs, formatCurrency)}. If you edit it, the invoice will use the figures worked out from its line items. Continue?`
+      );
+      if (!proceed) return;
+      working = { ...working, ...calcs, balance_due: Math.max(0, calcs.total - working.amount_paid) };
+    }
+
+    setSaving(true);
+    const listsLoaded = await loadBuilderLists();
+    setSaving(false);
+    if (!listsLoaded) {
+      alert("Couldn't load your customer list, so this invoice can't be edited right now. Please try again.");
+      return;
+    }
+
+    setEditSnapshot({ invoice, customer });
+    editBaseline.current = JSON.stringify(working);
+    pendingPhotoDeletes.current = [];
+    setJustSaved(null);
+    setInvoice(working);
+    setEditingSent(true);
+  };
+
+  const cancelEditing = () => {
+    if (!editSnapshot) return;
+    if (JSON.stringify(invoice) !== editBaseline.current && !confirm('Discard your changes to this invoice?')) return;
+    setInvoice(editSnapshot.invoice);
+    setCustomer(editSnapshot.customer);
+    pendingPhotoDeletes.current = [];
+    setStockWarnings([]);
+    setEditSnapshot(null);
+    setEditingSent(false);
+  };
+
+  // Keeps the calendar entry in step when the event date or location changes. Only touches a
+  // single linked entry that's still on the old date, so entries moved by hand stay put.
+  const syncAppointment = async (before: Invoice, after: Invoice): Promise<string> => {
+    const dateChanged = before.event_date !== after.event_date;
+    const locationChanged = (before.event_location || '') !== (after.event_location || '');
+    if (!dateChanged && !locationChanged) return '';
+
+    const { data: linked } = await supabase.from('appointments').select('*').eq('invoice_id', after.id);
+    if (!linked || linked.length === 0) return '';
+    if (linked.length > 1) return ' This invoice has more than one calendar entry, so they were left as they were.';
+
+    const appt = linked[0] as Appointment;
+    const updates: Partial<Pick<Appointment, 'location' | 'start_time' | 'end_time'>> = {};
+    let note = '';
+    if (locationChanged) {
+      updates.location = after.event_location;
+      note = ' The calendar entry has the new location.';
+    }
+    if (dateChanged && after.event_date) {
+      if (before.event_date && localDate(appt.start_time) === before.event_date) {
+        const duration = new Date(appt.end_time).getTime() - new Date(appt.start_time).getTime();
+        const start = moveToDate(appt.start_time, after.event_date);
+        updates.start_time = start;
+        updates.end_time = new Date(new Date(start).getTime() + duration).toISOString();
+        note = ' The calendar entry moved to the new date.';
+      } else {
+        note = " The calendar entry wasn't on the old event date, so its date was left alone.";
+      }
+    }
+    if (Object.keys(updates).length > 0) {
+      const { error } = await supabase.from('appointments').update(updates).eq('id', appt.id);
+      if (error) return ' The calendar entry could not be updated, so please change it on the Calendar page.';
+    }
+    return note;
+  };
+
+  const handleSaveEdits = async () => {
+    if (!invoice || !editSnapshot) return;
+    if (!invoice.customer_id) {
+      alert('Please choose a customer before saving.');
+      return;
+    }
+    if (!invoice.title?.trim()) {
+      alert('Please add a title before saving.');
+      return;
+    }
+    if (invoice.line_items.length === 0) {
+      alert('Add at least one line item before saving.');
+      return;
+    }
+    const settled = settleAfterEdit(editSnapshot.invoice, invoice.total, new Date().toISOString().split('T')[0]);
+    setSaving(true);
+
+    const payload = {
+      customer_id: invoice.customer_id,
+      title: invoice.title.trim(),
+      event_date: invoice.event_date || null,
+      event_location: invoice.event_location || null,
+      due_date: invoice.due_date || null,
+      line_items: invoice.line_items,
+      subtotal: invoice.subtotal,
+      discount_type: invoice.discount_type,
+      discount_value: invoice.discount_value,
+      discount_amount: invoice.discount_amount,
+      include_gst: invoice.include_gst,
+      gst_amount: invoice.gst_amount,
+      total: invoice.total,
+      deposit_percentage: invoice.deposit_percentage,
+      deposit_amount: invoice.deposit_amount,
+      notes: invoice.notes,
+      terms: invoice.terms,
+      ...settled,
+    };
+
+    const { error } = await supabase.from('invoices').update(payload).eq('id', invoice.id);
+    if (error) {
+      setSaving(false);
+      alert(`Failed to save changes: ${error.message}`);
+      return;
+    }
+
+    const saved: Invoice = { ...invoice, ...payload };
+    setInvoice(saved);
+    setCustomer(customers.find((c) => c.id === saved.customer_id) || customer);
+    setPayment((p) => ({ ...p, amount: saved.balance_due }));
+
+    const stillUsed = new Set(saved.line_items.flatMap((li) => li.photos || []));
+    const stale = pendingPhotoDeletes.current.filter((url) => !stillUsed.has(url));
+    pendingPhotoDeletes.current = [];
+    if (stale.length > 0) {
+      deletePhotosForLineItems([{ photos: stale }], supabase).catch((err) =>
+        console.error('Photo cleanup failed:', err)
+      );
+    }
+
+    let calendarNote = '';
+    try {
+      calendarNote = await syncAppointment(editSnapshot.invoice, saved);
+      await ensureConfirmedAppointment(saved.amount_paid);
+    } catch (err) {
+      console.error('Failed to update the calendar entry:', err);
+    }
+
+    setEditSnapshot(null);
+    setEditingSent(false);
+    setJustSaved(`Invoice updated.${calendarNote}`);
+    setSaving(false);
+  };
+
+  const openSendUpdated = () => {
+    if (!invoice) return;
+    setEmailSubject(`Updated invoice ${invoice.invoice_number} from Ideal Events Hire`);
+    setEmailBody('');
+    setSendModalOpen(true);
   };
 
   const handleRecordPayment = async () => {
@@ -748,8 +925,8 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     );
   }
 
-  // ===== Draft / new invoice: editable builder =====
-  if (isDraftMode) {
+  // ===== Draft / new invoice, or a sent invoice being edited: editable builder =====
+  if (isBuilderMode) {
     const selectedCustomer = customers.find((c) => c.id === invoice.customer_id);
 
     return (
@@ -765,8 +942,13 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               {isNew ? 'New Invoice' : invoice.invoice_number}
             </h2>
             {!isNew && <Badge status={invoice.status} />}
+            {editingSent && (
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[var(--color-accent-light)] text-[var(--color-primary)]">
+                Editing
+              </span>
+            )}
           </div>
-          {!isNew && (
+          {!isNew && !editingSent && (
             <div className="flex gap-2 flex-wrap">
               {settings && (
                 <PDFDownloadButton type="invoice" data={invoice} customer={selectedCustomer} settings={settings} />
@@ -820,9 +1002,14 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               <Input label="Title *" value={invoice.title} onChange={(e) => updateInvoice({ title: e.target.value })} placeholder="e.g. Wedding Styling Package" />
               <Input label="Event Date" type="date" value={invoice.event_date || ''} onChange={(e) => updateInvoice({ event_date: e.target.value || null })} />
               <Input label="Event Location" value={invoice.event_location || ''} onChange={(e) => updateInvoice({ event_location: e.target.value || null })} />
+              {editingSent && (
+                <Input label="Due Date" type="date" value={invoice.due_date || ''} onChange={(e) => updateInvoice({ due_date: e.target.value || null })} />
+              )}
             </div>
             <p className="text-xs text-[var(--color-text-muted)] -mt-3">
-              The due date is set automatically to the event date when you send this invoice.
+              {editingSent
+                ? "Changing the event date doesn't move the due date. Saving updates what the customer sees on their portal link straight away."
+                : 'The due date is set automatically to the event date when you send this invoice.'}
             </p>
 
             {/* Line Items */}
@@ -923,6 +1110,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                             photos={item.photos || []}
                             onChange={(next) => updateLineItem(item.id, 'photos', next)}
                             max={3}
+                            onPhotoRemoved={editingSent ? (url) => { pendingPhotoDeletes.current.push(url); } : undefined}
                           />
                         </div>
                       )}
@@ -998,6 +1186,24 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                   </div>
                   <span className="font-bold text-[var(--color-primary)]">{formatCurrency(invoice.deposit_amount)}</span>
                 </div>
+
+                {editingSent && (
+                  <>
+                    <div className="flex justify-between text-sm text-green-600">
+                      <span>Amount Paid</span>
+                      <span>{formatCurrency(invoice.amount_paid)}</span>
+                    </div>
+                    <div className="flex justify-between font-bold bg-[var(--color-primary)] text-white p-3 rounded-md">
+                      <span>Balance Due</span>
+                      <span>{formatCurrency(invoice.balance_due)}</span>
+                    </div>
+                    {invoice.amount_paid > invoice.total + 0.005 && (
+                      <p className="text-xs text-amber-700 dark:text-amber-400">
+                        Payments already recorded ({formatCurrency(invoice.amount_paid)}) are more than the new total, so the balance will show as {formatCurrency(0)}.
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
             </div>
 
@@ -1011,9 +1217,20 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
         {/* Sticky Save Bar */}
         <div className="fixed bottom-0 left-0 lg:left-60 right-0 bg-white dark:bg-[#1a1a1a] border-t border-[var(--color-border)] px-6 py-3 flex justify-end gap-3 z-30">
-          <Button variant="outline" onClick={handleSaveDraft} loading={saving}>
-            <Save className="w-4 h-4" /> Save Draft
-          </Button>
+          {editingSent ? (
+            <>
+              <Button variant="outline" onClick={cancelEditing} disabled={saving}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveEdits} loading={saving}>
+                <Save className="w-4 h-4" /> Save Changes
+              </Button>
+            </>
+          ) : (
+            <Button variant="outline" onClick={handleSaveDraft} loading={saving}>
+              <Save className="w-4 h-4" /> Save Draft
+            </Button>
+          )}
         </div>
 
         {/* Send Invoice Modal */}
@@ -1067,6 +1284,11 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           <Badge status={invoice.status} />
         </div>
         <div className="flex gap-2 flex-wrap">
+          {invoice.status !== 'cancelled' && (
+            <Button variant="outline" size="sm" onClick={startEditing} loading={saving}>
+              <Pencil className="w-3.5 h-3.5" /> Edit Invoice
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={copyPortalLink}>
             <Copy className="w-3.5 h-3.5" /> Portal Link
           </Button>
@@ -1092,6 +1314,27 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           )}
         </div>
       </div>
+
+      {justSaved && (
+        <div className="rounded-lg border border-green-300 bg-green-50 dark:bg-green-900/20 dark:border-green-800 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="flex-1 text-sm">
+            <p className="font-medium text-green-800 dark:text-green-300">{justSaved}</p>
+            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+              The customer&apos;s portal link shows the changes now. The email they already have doesn&apos;t change.
+            </p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            {invoice.balance_due > 0 && (
+              <Button size="sm" onClick={openSendUpdated}>
+                <Send className="w-3.5 h-3.5" /> Email updated invoice
+              </Button>
+            )}
+            <Button size="sm" variant="outline" onClick={() => setJustSaved(null)}>
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Invoice Display */}
       <Card>
