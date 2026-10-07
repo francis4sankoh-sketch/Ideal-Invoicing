@@ -20,6 +20,7 @@ import { LineItemPhotos } from '@/components/shared/line-item-photos';
 import { ProductPicker } from '@/components/shared/product-picker';
 import { deletePhotosForLineItems } from '@/lib/utils/photo-upload';
 import { cached, invalidate, TTL } from '@/lib/utils/cache';
+import { sendEmail } from '@/lib/utils/send-email';
 
 export default function QuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -323,36 +324,37 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
     setSaving(true);
 
     const customer = customers.find((c) => c.id === quote.customer_id);
-    if (!customer) return;
+    if (!customer) {
+      setSaving(false);
+      alert('Please choose a customer before sending.');
+      return;
+    }
 
     const portalUrl = `${window.location.origin}/portal/${customer.portal_token}?quote=${quote.id}`;
 
-    try {
-      await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'quote_sent',
-          customerEmail: customer.email,
-          customerName: customer.contact_name,
-          quoteNumber: quote.quote_number,
-          total: formatCurrency(quote.total),
-          depositAmount: formatCurrency(quote.deposit_amount),
-          portalUrl,
-          subject: emailSubject,
-          body: emailBody,
-        }),
-      });
-
-      await supabase
-        .from('quotes')
-        .update({ status: 'sent', sent_at: new Date().toISOString(), reminder_count: 0, last_reminder_sent: null })
-        .eq('id', quote.id);
-      setQuote({ ...quote, status: 'sent' });
-      setSendModalOpen(false);
-    } catch (err) {
-      console.error('Failed to send:', err);
+    const emailError = await sendEmail({
+      type: 'quote_sent',
+      customerEmail: customer.email,
+      customerName: customer.contact_name,
+      quoteNumber: quote.quote_number,
+      total: formatCurrency(quote.total),
+      depositAmount: formatCurrency(quote.deposit_amount),
+      portalUrl,
+      subject: emailSubject,
+      body: emailBody,
+    });
+    if (emailError) {
+      alert(`The quote email to ${customer.email} didn't go out, so the quote wasn't marked as sent: ${emailError}`);
+      setSaving(false);
+      return;
     }
+
+    await supabase
+      .from('quotes')
+      .update({ status: 'sent', sent_at: new Date().toISOString(), reminder_count: 0, last_reminder_sent: null })
+      .eq('id', quote.id);
+    setQuote({ ...quote, status: 'sent' });
+    setSendModalOpen(false);
     setSaving(false);
   };
 

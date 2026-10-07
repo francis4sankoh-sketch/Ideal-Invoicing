@@ -21,6 +21,7 @@ import { ProductPicker } from '@/components/shared/product-picker';
 import { QuickAddCustomer } from '@/components/shared/quick-add-customer';
 import { deletePhotosForLineItems } from '@/lib/utils/photo-upload';
 import { cached, TTL } from '@/lib/utils/cache';
+import { sendEmail } from '@/lib/utils/send-email';
 import {
   recalculateTotals as recalculate,
   normalizeForEditing,
@@ -432,26 +433,21 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       ${settings?.bank_reference_note ? `<p style="margin-top:8px;font-size:12px;color:#555;">${settings.bank_reference_note}</p>` : ''}
     `;
 
-    try {
-      await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'invoice_sent',
-          customerEmail: cust.email,
-          customerName: cust.contact_name,
-          invoiceNumber: invoice.invoice_number,
-          total: formatCurrency(updated.total),
-          balanceDue: formatCurrency(updated.total),
-          dueDate: formatDateDocument(dueDateStr),
-          bankDetails,
-          portalUrl,
-          subject: emailSubject,
-        }),
-      });
-      setSendModalOpen(false);
-    } catch (err) {
-      console.error('Failed to send invoice:', err);
+    const emailError = await sendEmail({
+      type: 'invoice_sent',
+      customerEmail: cust.email,
+      customerName: cust.contact_name,
+      invoiceNumber: invoice.invoice_number,
+      total: formatCurrency(updated.total),
+      balanceDue: formatCurrency(updated.total),
+      dueDate: formatDateDocument(dueDateStr),
+      bankDetails,
+      portalUrl,
+      subject: emailSubject,
+    });
+    setSendModalOpen(false);
+    if (emailError) {
+      alert(`The invoice is saved as sent, but the email to ${cust.email} didn't go out: ${emailError}\n\nUse Send Invoice to try again.`);
     }
     setSaving(false);
   };
@@ -709,21 +705,16 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
     // Only send confirmation email when ADDING a new payment, not when editing
     if (!isEditing && customer) {
-      try {
-        await fetch('/api/send-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'payment_confirmation',
-            customerEmail: customer.email,
-            customerName: customer.contact_name,
-            invoiceNumber: invoice.invoice_number,
-            amountPaid: formatCurrency(payment.amount),
-            remainingBalance: formatCurrency(updates.balance_due),
-          }),
-        });
-      } catch (err) {
-        console.error('Failed to send confirmation:', err);
+      const emailError = await sendEmail({
+        type: 'payment_confirmation',
+        customerEmail: customer.email,
+        customerName: customer.contact_name,
+        invoiceNumber: invoice.invoice_number,
+        amountPaid: formatCurrency(payment.amount),
+        remainingBalance: formatCurrency(updates.balance_due),
+      });
+      if (emailError) {
+        alert(`The payment is recorded, but the confirmation email to ${customer.email} didn't go out: ${emailError}`);
       }
     }
 
@@ -821,27 +812,23 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       ${settings.bank_reference_note ? `<p style="margin-top:8px;font-size:12px;color:#555;">${settings.bank_reference_note}</p>` : ''}
     `;
 
-    try {
-      await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'invoice_sent',
-          customerEmail: customer.email,
-          customerName: customer.contact_name,
-          invoiceNumber: invoice.invoice_number,
-          total: formatCurrency(invoice.total),
-          balanceDue: formatCurrency(invoice.balance_due),
-          dueDate: invoice.due_date ? formatDateDocument(invoice.due_date) : 'Not set',
-          bankDetails,
-          portalUrl,
-          subject: emailSubject,
-          body: emailBody,
-        }),
-      });
+    const emailError = await sendEmail({
+      type: 'invoice_sent',
+      customerEmail: customer.email,
+      customerName: customer.contact_name,
+      invoiceNumber: invoice.invoice_number,
+      total: formatCurrency(invoice.total),
+      balanceDue: formatCurrency(invoice.balance_due),
+      dueDate: invoice.due_date ? formatDateDocument(invoice.due_date) : 'Not set',
+      bankDetails,
+      portalUrl,
+      subject: emailSubject,
+      body: emailBody,
+    });
+    if (emailError) {
+      alert(`The invoice email to ${customer.email} didn't go out: ${emailError}`);
+    } else {
       setSendModalOpen(false);
-    } catch (err) {
-      console.error('Failed to send:', err);
     }
     setSaving(false);
   };
@@ -856,25 +843,21 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       <div class="detail-row"><span class="detail-label">Account:</span> <span class="detail-value">${settings.account_number || 'N/A'}</span></div>
     `;
 
-    try {
-      await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'payment_reminder',
-          customerEmail: customer.email,
-          customerName: customer.contact_name,
-          invoiceNumber: invoice.invoice_number,
-          balanceDue: formatCurrency(invoice.balance_due),
-          dueDate: invoice.due_date ? formatDateDocument(invoice.due_date) : 'Not set',
-          bankDetails,
-          portalUrl,
-        }),
-      });
-
+    const emailError = await sendEmail({
+      type: 'payment_reminder',
+      customerEmail: customer.email,
+      customerName: customer.contact_name,
+      invoiceNumber: invoice.invoice_number,
+      balanceDue: formatCurrency(invoice.balance_due),
+      dueDate: invoice.due_date ? formatDateDocument(invoice.due_date) : 'Not set',
+      bankDetails,
+      portalUrl,
+    });
+    if (emailError) {
+      alert(`The reminder to ${customer.email} didn't go out: ${emailError}`);
+    } else {
       await supabase.from('invoices').update({ last_reminder_sent: new Date().toISOString().split('T')[0] }).eq('id', invoice.id);
-    } catch (err) {
-      console.error('Failed to send reminder:', err);
+      alert(`Reminder sent to ${customer.email}.`);
     }
     setSaving(false);
   };

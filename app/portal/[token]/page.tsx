@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, use } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { useSearchParams } from 'next/navigation';
 import { Customer, Quote, Invoice, QuoteMessage, BusinessSettings } from '@/types';
+
+type PortalCustomer = Pick<Customer, 'id' | 'contact_name' | 'business_name' | 'email'>;
 import { formatCurrency, formatDateDocument, formatDateAU } from '@/lib/utils/format';
 import { Badge } from '@/components/ui/badge';
 import { Check, X, MessageCircle, FileText, Receipt, Send } from 'lucide-react';
@@ -14,7 +15,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
   const quoteId = searchParams.get('quote');
   const invoiceId = searchParams.get('invoice');
 
-  const [customer, setCustomer] = useState<Customer | null>(null);
+  const [customer, setCustomer] = useState<PortalCustomer | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
@@ -26,135 +27,102 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'home' | 'quote' | 'invoice'>('home');
-  const supabase = createClient();
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Everything goes through /api/portal, which checks the token server-side.
+  const portal = async <T,>(action: string, extra: Record<string, unknown> = {}): Promise<T> => {
+    const res = await fetch('/api/portal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, token, ...extra }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+    return data as T;
+  };
 
   useEffect(() => { loadPortal(); }, [token]);
 
   const loadPortal = async () => {
-    const { data: cust } = await supabase
-      .from('customers')
-      .select('*')
-      .eq('portal_token', token)
-      .single();
+    try {
+      const data = await portal<{ customer: PortalCustomer; quotes: Quote[]; invoices: Invoice[]; settings: BusinessSettings | null }>('load');
+      setCustomer(data.customer);
+      setQuotes(data.quotes);
+      setInvoices(data.invoices);
+      setSettings(data.settings);
 
-    if (!cust) { setLoading(false); return; }
-    setCustomer(cust);
-
-    const [quotesRes, invoicesRes, settingsRes] = await Promise.all([
-      supabase.from('quotes').select('*').eq('customer_id', cust.id).order('created_at', { ascending: false }),
-      supabase.from('invoices').select('*').eq('customer_id', cust.id).order('created_at', { ascending: false }),
-      supabase.from('business_settings').select('*').limit(1).single(),
-    ]);
-
-    setQuotes(quotesRes.data || []);
-    setInvoices(invoicesRes.data || []);
-    setSettings(settingsRes.data);
-
-    if (quoteId) {
-      const q = quotesRes.data?.find((q) => q.id === quoteId);
-      if (q) { setSelectedQuote(q); setView('quote'); recordView('quotes', quoteId); loadMessages(quoteId); }
-    } else if (invoiceId) {
-      const inv = invoicesRes.data?.find((i) => i.id === invoiceId);
-      if (inv) { setSelectedInvoice(inv); setView('invoice'); recordView('invoices', invoiceId); }
+      if (quoteId) {
+        const q = data.quotes.find((q) => q.id === quoteId);
+        if (q) openQuote(q);
+      } else if (invoiceId) {
+        const inv = data.invoices.find((i) => i.id === invoiceId);
+        if (inv) openInvoice(inv);
+      }
+    } catch {
+      setCustomer(null);
     }
-
     setLoading(false);
   };
 
-  const recordView = async (table: string, id: string) => {
-    const now = new Date().toISOString();
-    await supabase.from(table).update({ last_viewed: now }).eq('id', id);
+  const recordView = (kind: 'quote' | 'invoice', id: string) => {
+    portal('record_view', { kind, id }).catch(() => {});
   };
 
   const loadMessages = async (qId: string) => {
-    const { data } = await supabase
-      .from('quote_messages')
-      .select('*')
-      .eq('quote_id', qId)
-      .order('created_at', { ascending: true });
-    setMessages(data || []);
-  };
-
-  const handleAcceptQuote = async () => {
-    if (!selectedQuote || !customer) return;
-
-    await supabase.from('quotes').update({ status: 'accepted' }).eq('id', selectedQuote.id);
-    setSelectedQuote({ ...selectedQuote, status: 'accepted' });
-
     try {
-      await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'quote_accepted',
-          customerName: customer.contact_name,
-          quoteNumber: selectedQuote.quote_number,
-          total: formatCurrency(selectedQuote.total),
-          depositAmount: formatCurrency(selectedQuote.deposit_amount),
-        }),
-      });
-    } catch {}
+      const data = await portal<{ messages: QuoteMessage[] }>('load_messages', { quoteId: qId });
+      setMessages(data.messages);
+    } catch {
+      setMessages([]);
+    }
   };
 
-  const handleRejectQuote = async () => {
-    if (!selectedQuote || !customer) return;
-
-    await supabase.from('quotes').update({ status: 'rejected' }).eq('id', selectedQuote.id);
-    setSelectedQuote({ ...selectedQuote, status: 'rejected' });
-    setShowRejectModal(false);
-
+  const answerQuote = async (action: 'accept_quote' | 'reject_quote') => {
+    if (!selectedQuote || busy) return;
+    setBusy(true);
+    setActionError(null);
     try {
-      await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'quote_rejected',
-          customerName: customer.contact_name,
-          quoteNumber: selectedQuote.quote_number,
-          reason: rejectReason,
-        }),
-      });
-    } catch {}
+      const data = await portal<{ status: Quote['status'] }>(action, { quoteId: selectedQuote.id, reason: rejectReason });
+      const updated = { ...selectedQuote, status: data.status };
+      setSelectedQuote(updated);
+      setQuotes((qs) => qs.map((q) => (q.id === updated.id ? updated : q)));
+      setShowRejectModal(false);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Something went wrong');
+    }
+    setBusy(false);
   };
+
+  const handleAcceptQuote = () => answerQuote('accept_quote');
+  const handleRejectQuote = () => answerQuote('reject_quote');
 
   const handleSendMessage = async () => {
-    if (!messageText.trim() || !selectedQuote || !customer) return;
-
-    await supabase.from('quote_messages').insert({
-      quote_id: selectedQuote.id,
-      sender_type: 'customer',
-      sender_name: customer.contact_name,
-      message: messageText.trim(),
-    });
-
+    if (!messageText.trim() || !selectedQuote || busy) return;
+    setBusy(true);
+    setActionError(null);
     try {
-      await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'new_message',
-          customerName: customer.contact_name,
-          quoteNumber: selectedQuote.quote_number,
-          messagePreview: messageText.trim().slice(0, 100),
-        }),
-      });
-    } catch {}
-
-    setMessageText('');
-    loadMessages(selectedQuote.id);
+      await portal('send_message', { quoteId: selectedQuote.id, message: messageText.trim() });
+      setMessageText('');
+      await loadMessages(selectedQuote.id);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Your message could not be sent');
+    }
+    setBusy(false);
   };
 
   const openQuote = (q: Quote) => {
     setSelectedQuote(q);
+    setActionError(null);
     setView('quote');
-    recordView('quotes', q.id);
+    recordView('quote', q.id);
     loadMessages(q.id);
   };
 
   const openInvoice = (inv: Invoice) => {
     setSelectedInvoice(inv);
     setView('invoice');
-    recordView('invoices', inv.id);
+    recordView('invoice', inv.id);
   };
 
   if (loading) {
@@ -185,7 +153,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>Ideal</h1>
-            <p className="text-[10px] tracking-[0.25em] uppercase text-white/70">Events Group</p>
+            <p className="text-[10px] tracking-[0.25em] uppercase text-white/70">Events Hire</p>
           </div>
           {view !== 'home' && (
             <button onClick={() => setView('home')} className="text-sm text-white/80 hover:text-white">
@@ -377,12 +345,17 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
               )}
             </div>
 
+            {actionError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm text-center">{actionError}</div>
+            )}
+
             {/* Accept/Reject Buttons */}
             {selectedQuote.status === 'sent' && (
               <div className="flex gap-3 justify-center">
                 <button
                   onClick={handleAcceptQuote}
-                  className="flex items-center gap-2 px-8 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
+                  disabled={busy}
+                  className="flex items-center gap-2 px-8 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors disabled:opacity-60"
                 >
                   <Check className="w-5 h-5" /> Accept Quote
                 </button>
@@ -436,7 +409,8 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
                 />
                 <button
                   onClick={handleSendMessage}
-                  className="px-4 py-2 bg-[#800020] text-white rounded-md text-sm hover:bg-[#4a0012] transition-colors flex items-center gap-1"
+                  disabled={busy}
+                  className="px-4 py-2 bg-[#800020] text-white rounded-md text-sm hover:bg-[#4a0012] transition-colors flex items-center gap-1 disabled:opacity-60"
                 >
                   <Send className="w-4 h-4" /> Send
                 </button>
@@ -458,7 +432,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
                   />
                   <div className="flex gap-3 justify-end">
                     <button onClick={() => setShowRejectModal(false)} className="px-4 py-2 border border-gray-200 rounded-md text-sm">Cancel</button>
-                    <button onClick={handleRejectQuote} className="px-4 py-2 bg-red-600 text-white rounded-md text-sm hover:bg-red-700">Confirm Rejection</button>
+                    <button onClick={handleRejectQuote} disabled={busy} className="px-4 py-2 bg-red-600 text-white rounded-md text-sm hover:bg-red-700 disabled:opacity-60">Confirm Rejection</button>
                   </div>
                 </div>
               </div>
