@@ -249,7 +249,7 @@ export interface WebsiteEnquiry {
   venue_access: string | null;
   selected_items: EnquiryItem[];
   additional_notes: string | null;
-  status: 'new' | 'converted' | 'dismissed';
+  status: 'new' | 'contacted' | 'invoiced' | 'completed' | 'dismissed' | 'converted';
   source: string;
   created_at: string;
 }

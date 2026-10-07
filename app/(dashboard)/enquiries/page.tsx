@@ -16,8 +16,6 @@ import {
   DollarSign,
   Building2,
   ExternalLink,
-  CheckCircle2,
-  XCircle,
   FileText,
   Phone,
 } from 'lucide-react';
@@ -27,12 +25,17 @@ type EnquiryRow = WebsiteEnquiry & {
   invoice?: { id: string; invoice_number: string; status: string; total: number } | null;
 };
 
-const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: 'all', label: 'All' },
+type EnquiryStatus = WebsiteEnquiry['status'];
+
+const ENQUIRY_STATUSES: Array<{ value: EnquiryStatus; label: string }> = [
   { value: 'new', label: 'New' },
-  { value: 'converted', label: 'Converted' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'invoiced', label: 'Invoiced' },
+  { value: 'completed', label: 'Completed' },
   { value: 'dismissed', label: 'Dismissed' },
 ];
+
+const STATUS_OPTIONS: Array<{ value: string; label: string }> = [{ value: 'all', label: 'All' }, ...ENQUIRY_STATUSES];
 
 export default function EnquiriesPage() {
   const [enquiries, setEnquiries] = useState<EnquiryRow[]>([]);
@@ -55,9 +58,14 @@ export default function EnquiriesPage() {
     setLoading(false);
   };
 
-  const updateStatus = async (id: string, status: 'new' | 'converted' | 'dismissed') => {
-    await supabase.from('website_enquiries').update({ status }).eq('id', id);
-    await load();
+  const updateStatus = async (id: string, status: EnquiryStatus) => {
+    const previous = enquiries;
+    setEnquiries((rows) => rows.map((r) => (r.id === id ? { ...r, status } : r)));
+    const { error } = await supabase.from('website_enquiries').update({ status }).eq('id', id);
+    if (error) {
+      setEnquiries(previous);
+      alert(`Couldn't update the status: ${error.message}`);
+    }
   };
 
   const filtered = useMemo(() => {
@@ -177,24 +185,19 @@ export default function EnquiriesPage() {
                         </Button>
                       </Link>
                     )}
-                    {enq.status !== 'converted' && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => updateStatus(enq.id, 'converted')}
-                      >
-                        <CheckCircle2 className="w-4 h-4" /> Mark converted
-                      </Button>
-                    )}
-                    {enq.status !== 'dismissed' && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => updateStatus(enq.id, 'dismissed')}
-                      >
-                        <XCircle className="w-4 h-4" /> Dismiss
-                      </Button>
-                    )}
+                    <select
+                      aria-label={`Status for ${enq.name}`}
+                      value={enq.status}
+                      onChange={(e) => updateStatus(enq.id, e.target.value as EnquiryStatus)}
+                      className="h-9 px-3 border border-[var(--color-border)] rounded-md text-sm bg-white dark:bg-[#1a1a1a] text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                    >
+                      {enq.status === 'converted' && <option value="converted">Converted</option>}
+                      {ENQUIRY_STATUSES.map((s) => (
+                        <option key={s.value} value={s.value}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
