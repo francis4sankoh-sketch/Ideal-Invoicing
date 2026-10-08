@@ -7,7 +7,7 @@ import { Input, Textarea, Select } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { AUSTRALIAN_STATES, BusinessSettings } from '@/types';
 import { invalidate } from '@/lib/utils/cache';
-import { Save, Upload } from 'lucide-react';
+import { Save, Upload, Copy, CalendarPlus } from 'lucide-react';
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<BusinessSettings | null>(null);
@@ -16,9 +16,25 @@ export default function SettingsPage() {
   const [message, setMessage] = useState('');
   const supabase = createClient();
 
+  const [calendarUrl, setCalendarUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
     loadSettings();
+    fetch('/api/calendar/link')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d?.url && setCalendarUrl(d.url))
+      .catch(() => {});
   }, []);
+
+  const webcalUrl = calendarUrl?.replace(/^https?:\/\//, 'webcal://') || '';
+
+  const copyCalendarUrl = async () => {
+    if (!calendarUrl) return;
+    await navigator.clipboard.writeText(calendarUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   const loadSettings = async () => {
     const { data } = await supabase.from('business_settings').select('*').limit(1).single();
@@ -220,6 +236,59 @@ export default function SettingsPage() {
               <option value="Georgia">Georgia</option>
             </Select>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Calendar sync */}
+      <Card>
+        <CardHeader>
+          <h3 className="text-lg font-bold" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
+            Calendar Sync
+          </h3>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-[var(--color-text-muted)]">
+            Show your confirmed events in Google Calendar or Apple Calendar. New bookings, date changes and
+            cancellations update automatically, usually within a few hours. Keep this link private: anyone with it can
+            see your events.
+          </p>
+          {calendarUrl ? (
+            <>
+              <div className="flex gap-2">
+                <input
+                  readOnly
+                  value={calendarUrl}
+                  onFocus={(e) => e.target.select()}
+                  className="flex-1 min-w-0 px-3 py-2 border border-[var(--color-border)] rounded-md text-xs bg-[var(--color-bg-light)] text-[var(--color-text)]"
+                />
+                <Button variant="outline" size="sm" onClick={copyCalendarUrl}>
+                  <Copy className="w-3.5 h-3.5" /> {copied ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href={`https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcalUrl)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Button variant="outline" size="sm">
+                    <CalendarPlus className="w-3.5 h-3.5" /> Add to Google Calendar
+                  </Button>
+                </a>
+                <a href={webcalUrl}>
+                  <Button variant="outline" size="sm">
+                    <CalendarPlus className="w-3.5 h-3.5" /> Add to Apple Calendar
+                  </Button>
+                </a>
+              </div>
+              <p className="text-xs text-[var(--color-text-muted)]">
+                On iPhone, open this page in Safari and tap Add to Apple Calendar, or go to Settings, Calendar,
+                Accounts, Add Account, Other, Add Subscribed Calendar and paste the link.
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-[var(--color-text-muted)]">The calendar link isn&apos;t set up yet.</p>
+          )}
         </CardContent>
       </Card>
 
