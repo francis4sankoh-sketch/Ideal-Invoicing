@@ -22,6 +22,7 @@ import { QuickAddCustomer } from '@/components/shared/quick-add-customer';
 import { deletePhotosForLineItems } from '@/lib/utils/photo-upload';
 import { cached, TTL } from '@/lib/utils/cache';
 import { sendEmail } from '@/lib/utils/send-email';
+import { advanceEnquiryForInvoice } from '@/lib/utils/enquiry-status';
 import {
   recalculateTotals as recalculate,
   normalizeForEditing,
@@ -463,6 +464,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
     const updated = { ...invoice, ...payload };
     setInvoice(updated);
+    advanceEnquiryForInvoice(supabase, invoice.id, updated.status);
     setCustomer(cust);
 
     const portalUrl = `${window.location.origin}/portal/${cust.portal_token}?invoice=${invoice.id}`;
@@ -675,6 +677,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
     const saved: Invoice = { ...invoice, ...payload };
     setInvoice(saved);
+    advanceEnquiryForInvoice(supabase, saved.id, saved.status);
     setCustomer(customers.find((c) => c.id === saved.customer_id) || customer);
     setPayment((p) => ({ ...p, amount: saved.balance_due }));
 
@@ -736,6 +739,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       return;
     }
     setInvoice({ ...invoice, ...updates });
+    advanceEnquiryForInvoice(supabase, invoice.id, updates.status);
 
     // Auto-create the calendar appointment once the deposit is covered
     try {
