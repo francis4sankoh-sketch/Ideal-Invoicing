@@ -3,8 +3,10 @@
 export type FeedEvent = {
   id: string;
   title: string;
-  start: string; // ISO timestamp
-  end: string; // ISO timestamp
+  start: string; // ISO timestamp, or YYYY-MM-DD when allDay
+  end: string; // ISO timestamp, or YYYY-MM-DD (the last day) when allDay
+  allDay?: boolean;
+  tentative?: boolean;
   updated?: string | null;
   location?: string | null;
   description?: string | null;
@@ -18,6 +20,15 @@ function escapeText(s: string): string {
 function utcStamp(iso: string): string {
   return new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 }
+
+// All-day events end on the day AFTER the last day (exclusive), per RFC 5545.
+function dayAfter(ymd: string): string {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+const compactDate = (ymd: string) => ymd.replace(/-/g, '');
 
 // RFC 5545: lines longer than 75 bytes continue on the next line, which starts with a space.
 function fold(line: string): string {
@@ -55,14 +66,15 @@ export function buildIcs(calendarName: string, events: FeedEvent[], now = new Da
       'BEGIN:VEVENT',
       `UID:${e.id}@ideal-invoicing`,
       `DTSTAMP:${utcStamp(e.updated || now.toISOString())}`,
-      `DTSTART:${utcStamp(e.start)}`,
-      `DTEND:${utcStamp(e.end)}`,
+      ...(e.allDay
+        ? [`DTSTART;VALUE=DATE:${compactDate(e.start)}`, `DTEND;VALUE=DATE:${compactDate(dayAfter(e.end))}`]
+        : [`DTSTART:${utcStamp(e.start)}`, `DTEND:${utcStamp(e.end)}`]),
       `SUMMARY:${escapeText(e.title)}`
     );
     if (e.location) lines.push(`LOCATION:${escapeText(e.location)}`);
     if (e.description) lines.push(`DESCRIPTION:${escapeText(e.description)}`);
     if (e.url) lines.push(`URL:${e.url}`);
-    lines.push('STATUS:CONFIRMED', 'END:VEVENT');
+    lines.push(e.tentative ? 'STATUS:TENTATIVE' : 'STATUS:CONFIRMED', 'TRANSP:OPAQUE', 'END:VEVENT');
   }
   lines.push('END:VCALENDAR');
   return lines.map(fold).join('\r\n') + '\r\n';
