@@ -6,6 +6,8 @@ import {
   sendNewMessageNotification,
 } from '@/lib/resend/emails';
 import { formatCurrency } from '@/lib/utils/format';
+import { sendTelegram } from '@/lib/notify/telegram';
+import { customerMessageAlert, threadColumn, type ThreadKind } from '@/lib/messages/thread';
 
 // The portal has no login: the customer's portal_token is the only credential, so every
 // action re-checks it and only ever touches that customer's own quotes and invoices.
@@ -16,16 +18,23 @@ const SETTINGS_FIELDS =
 
 type Supabase = Awaited<ReturnType<typeof createServiceRoleClient>>;
 
-async function ownQuote(supabase: Supabase, customerId: string, quoteId: unknown) {
-  if (typeof quoteId !== 'string' || !quoteId) return null;
+async function ownDoc(supabase: Supabase, customerId: string, kind: ThreadKind, id: unknown) {
+  if (typeof id !== 'string' || !id) return null;
   const { data } = await supabase
-    .from('quotes')
+    .from(kind === 'quote' ? 'quotes' : 'invoices')
     .select('*')
-    .eq('id', quoteId)
+    .eq('id', id)
     .eq('customer_id', customerId)
     .neq('status', 'draft')
     .maybeSingle();
   return data;
+}
+
+const ownQuote = (supabase: Supabase, customerId: string, quoteId: unknown) =>
+  ownDoc(supabase, customerId, 'quote', quoteId);
+
+function threadKind(value: unknown): ThreadKind | null {
+  return value === 'quote' || value === 'invoice' ? value : null;
 }
 
 export async function POST(request: NextRequest) {
@@ -64,12 +73,13 @@ export async function POST(request: NextRequest) {
       }
 
       case 'load_messages': {
-        const quote = await ownQuote(supabase, customer.id, body.quoteId);
-        if (!quote) return Response.json({ error: 'Not found' }, { status: 404 });
+        const kind = threadKind(body.kind);
+        const doc = kind ? await ownDoc(supabase, customer.id, kind, body.id) : null;
+        if (!kind || !doc) return Response.json({ error: 'Not found' }, { status: 404 });
         const { data } = await supabase
           .from('quote_messages')
           .select('*')
-          .eq('quote_id', quote.id)
+          .eq(threadColumn(kind), doc.id)
           .order('created_at', { ascending: true });
         return Response.json({ messages: data || [] });
       }
@@ -118,28 +128,33 @@ export async function POST(request: NextRequest) {
       }
 
       case 'send_message': {
-        const quote = await ownQuote(supabase, customer.id, body.quoteId);
+        const kind = threadKind(body.kind);
+        const doc = kind ? await ownDoc(supabase, customer.id, kind, body.id) : null;
         const message = typeof body.message === 'string' ? body.message.trim().slice(0, 5000) : '';
-        if (!quote) return Response.json({ error: 'Not found' }, { status: 404 });
+        if (!kind || !doc) return Response.json({ error: 'Not found' }, { status: 404 });
         if (!message) return Response.json({ error: 'Message is empty' }, { status: 400 });
 
         const { error } = await supabase.from('quote_messages').insert({
-          quote_id: quote.id,
+          [threadColumn(kind)]: doc.id,
           sender_type: 'customer',
           sender_name: customer.contact_name,
           message,
         });
         if (error) return Response.json({ error: error.message }, { status: 500 });
 
-        try {
-          await sendNewMessageNotification({
+        const number = kind === 'quote' ? doc.quote_number : doc.invoice_number;
+        const label = `${kind === 'quote' ? 'quote' : 'invoice'} ${number}`;
+        const [emailResult, telegramResult] = await Promise.allSettled([
+          sendNewMessageNotification({
             customerName: customer.contact_name,
-            quoteNumber: quote.quote_number,
+            documentLabel: label,
             messagePreview: message.slice(0, 100),
-          });
-        } catch (err) {
-          console.error('New message notification failed:', err);
-        }
+            appPath: `/${kind === 'quote' ? 'quotes' : 'invoices'}/${doc.id}`,
+          }),
+          sendTelegram(customerMessageAlert({ customerName: customer.contact_name, label, message, kind, id: doc.id })),
+        ]);
+        if (emailResult.status === 'rejected') console.error('New message email failed:', emailResult.reason);
+        if (telegramResult.status === 'rejected') console.error('New message Telegram alert failed:', telegramResult.reason);
         return Response.json({ success: true });
       }
 

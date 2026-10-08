@@ -7,10 +7,10 @@ import { Input, Textarea, Select } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
-import { Invoice, Customer, LineItem, Product, BusinessSettings, Expense, PaymentRecord, Appointment, PAYMENT_METHODS } from '@/types';
+import { Invoice, Customer, LineItem, Product, BusinessSettings, Expense, PaymentRecord, Appointment, QuoteMessage, PAYMENT_METHODS } from '@/types';
 import { formatCurrency, formatDateAU, formatDateDocument, generateId } from '@/lib/utils/format';
 import {
-  ArrowLeft, Send, Bell, DollarSign, Ban, Copy, TrendingUp, TrendingDown, Receipt,
+  ArrowLeft, Send, Bell, MessageCircle, DollarSign, Ban, Copy, TrendingUp, TrendingDown, Receipt,
   Plus, Trash2, Pencil, CheckCircle2, Save, ChevronDown, ChevronUp, AlertTriangle, UserPlus,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -65,6 +65,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   const pendingPhotoDeletes = useRef<string[]>([]);
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [messages, setMessages] = useState<QuoteMessage[]>([]);
+  const [replyText, setReplyText] = useState('');
+  const [replying, setReplying] = useState(false);
 
   const [payment, setPayment] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -140,6 +143,43 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       }
     }
     setStockWarnings(warnings);
+  };
+
+  // Customer messages on this invoice (from the portal); opening the invoice marks them read.
+  const loadMessages = async () => {
+    const { data } = await supabase
+      .from('quote_messages')
+      .select('*')
+      .eq('invoice_id', id)
+      .order('created_at', { ascending: true });
+    setMessages(data || []);
+    if (data?.some((m) => m.sender_type === 'customer' && !m.read)) {
+      await supabase
+        .from('quote_messages')
+        .update({ read: true })
+        .eq('invoice_id', id)
+        .eq('sender_type', 'customer')
+        .eq('read', false);
+    }
+  };
+
+  const handleReply = async () => {
+    if (!replyText.trim() || replying) return;
+    setReplying(true);
+    const res = await fetch('/api/messages/reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'invoice', id, message: replyText.trim() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(`Your reply wasn't sent: ${data.error || res.status}`);
+    } else {
+      setReplyText('');
+      await loadMessages();
+      if (!data.emailed) alert("Your reply is in the customer's portal, but the email letting them know didn't go out.");
+    }
+    setReplying(false);
   };
 
   // The customer list + product catalogue the builder needs. Returns false if the customers didn't load.
@@ -230,6 +270,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       ]);
       if (custRes.data) setCustomer(custRes.data);
       setExpenses(expensesRes.data || []);
+      loadMessages();
 
       // A draft needs the full customer list + product catalogue to keep editing
       if (invRes.data.status === 'draft') await loadBuilderLists();
@@ -1541,6 +1582,51 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               <strong>Notes:</strong> {invoice.notes}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Customer messages */}
+      <Card>
+        <CardHeader>
+          <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
+            <MessageCircle className="w-4 h-4" /> Messages
+          </h3>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3 max-h-72 overflow-y-auto mb-4">
+            {messages.length === 0 ? (
+              <p className="text-sm text-[var(--color-text-muted)]">
+                No messages yet. Customers can message you from their portal link.
+              </p>
+            ) : (
+              messages.map((m) => (
+                <div
+                  key={m.id}
+                  className={`p-3 rounded-lg text-sm max-w-[80%] ${
+                    m.sender_type === 'business'
+                      ? 'ml-auto bg-[var(--color-primary)] text-white'
+                      : 'bg-[var(--color-bg-light)] text-[var(--color-text)]'
+                  }`}
+                >
+                  <p className="text-xs opacity-70 mb-1">{m.sender_name || m.sender_type}</p>
+                  <p className="whitespace-pre-wrap">{m.message}</p>
+                  <p className="text-xs opacity-50 mt-1">{formatDateAU(m.created_at)}</p>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="flex gap-2">
+            <input
+              value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              placeholder="Reply to the customer (they'll get an email)..."
+              className="flex-1 px-3 py-2 border border-[var(--color-border)] rounded-md text-sm bg-white dark:bg-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+              onKeyDown={(e) => e.key === 'Enter' && handleReply()}
+            />
+            <Button size="sm" onClick={handleReply} loading={replying}>
+              Send
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

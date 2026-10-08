@@ -50,7 +50,8 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith('/portal') ||
     pathname.startsWith('/api/enquiry') ||
     pathname.startsWith('/api/products') ||
-    pathname.startsWith('/api/portal')
+    pathname.startsWith('/api/portal') ||
+    pathname.startsWith('/api/telegram')
   ) {
     return supabaseResponse;
   }

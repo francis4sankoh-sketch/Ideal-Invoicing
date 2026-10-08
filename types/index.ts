@@ -100,7 +100,8 @@ export interface Invoice {
 
 export interface QuoteMessage {
   id: string;
-  quote_id: string;
+  quote_id: string | null;
+  invoice_id?: string | null;
   sender_type: 'business' | 'customer';
   sender_name: string | null;
   message: string;

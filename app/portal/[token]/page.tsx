@@ -21,6 +21,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [messages, setMessages] = useState<QuoteMessage[]>([]);
+  const [thread, setThread] = useState<{ kind: 'quote' | 'invoice'; id: string } | null>(null);
   const [settings, setSettings] = useState<BusinessSettings | null>(null);
   const [messageText, setMessageText] = useState('');
   const [rejectReason, setRejectReason] = useState('');
@@ -69,9 +70,9 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
     portal('record_view', { kind, id }).catch(() => {});
   };
 
-  const loadMessages = async (qId: string) => {
+  const loadMessages = async (kind: 'quote' | 'invoice', id: string) => {
     try {
-      const data = await portal<{ messages: QuoteMessage[] }>('load_messages', { quoteId: qId });
+      const data = await portal<{ messages: QuoteMessage[] }>('load_messages', { kind, id });
       setMessages(data.messages);
     } catch {
       setMessages([]);
@@ -98,32 +99,80 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
   const handleRejectQuote = () => answerQuote('reject_quote');
 
   const handleSendMessage = async () => {
-    if (!messageText.trim() || !selectedQuote || busy) return;
+    if (!messageText.trim() || !thread || busy) return;
     setBusy(true);
     setActionError(null);
     try {
-      await portal('send_message', { quoteId: selectedQuote.id, message: messageText.trim() });
+      await portal('send_message', { kind: thread.kind, id: thread.id, message: messageText.trim() });
       setMessageText('');
-      await loadMessages(selectedQuote.id);
+      await loadMessages(thread.kind, thread.id);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Your message could not be sent');
     }
     setBusy(false);
   };
 
+  const openThread = (kind: 'quote' | 'invoice', id: string) => {
+    setThread({ kind, id });
+    setMessages([]);
+    setMessageText('');
+    setActionError(null);
+    recordView(kind, id);
+    loadMessages(kind, id);
+  };
+
   const openQuote = (q: Quote) => {
     setSelectedQuote(q);
-    setActionError(null);
     setView('quote');
-    recordView('quote', q.id);
-    loadMessages(q.id);
+    openThread('quote', q.id);
   };
 
   const openInvoice = (inv: Invoice) => {
     setSelectedInvoice(inv);
     setView('invoice');
-    recordView('invoice', inv.id);
+    openThread('invoice', inv.id);
   };
+
+  const messagesPanel = (
+    <div className="bg-white rounded-lg shadow-sm p-6">
+      <h3 className="font-bold text-sm mb-4 flex items-center gap-2">
+        <MessageCircle className="w-4 h-4" /> Messages
+      </h3>
+      <div className="space-y-3 max-h-64 overflow-y-auto mb-4">
+        {messages.length === 0 ? (
+          <p className="text-sm text-gray-400">No messages yet. Send us a message below.</p>
+        ) : (
+          messages.map((m) => (
+            <div
+              key={m.id}
+              className={`p-3 rounded-lg text-sm max-w-[80%] ${
+                m.sender_type === 'customer' ? 'ml-auto bg-[#800020] text-white' : 'bg-gray-100 text-gray-800'
+              }`}
+            >
+              <p className="text-xs opacity-70 mb-1">{m.sender_name || m.sender_type}</p>
+              <p className="whitespace-pre-wrap">{m.message}</p>
+            </div>
+          ))
+        )}
+      </div>
+      <div className="flex gap-2">
+        <input
+          value={messageText}
+          onChange={(e) => setMessageText(e.target.value)}
+          placeholder="Type a message..."
+          className="flex-1 px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[#800020]"
+          onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+        />
+        <button
+          onClick={handleSendMessage}
+          disabled={busy}
+          className="px-4 py-2 bg-[#800020] text-white rounded-md text-sm hover:bg-[#4a0012] transition-colors flex items-center gap-1 disabled:opacity-60"
+        >
+          <Send className="w-4 h-4" /> Send
+        </button>
+      </div>
+    </div>
+  );
 
   if (loading) {
     return (
@@ -375,47 +424,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
               </div>
             )}
 
-            {/* Messages */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h3 className="font-bold text-sm mb-4 flex items-center gap-2">
-                <MessageCircle className="w-4 h-4" /> Messages
-              </h3>
-              <div className="space-y-3 max-h-64 overflow-y-auto mb-4">
-                {messages.length === 0 ? (
-                  <p className="text-sm text-gray-400">No messages yet. Send us a message below.</p>
-                ) : (
-                  messages.map((m) => (
-                    <div
-                      key={m.id}
-                      className={`p-3 rounded-lg text-sm max-w-[80%] ${
-                        m.sender_type === 'customer'
-                          ? 'ml-auto bg-[#800020] text-white'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}
-                    >
-                      <p className="text-xs opacity-70 mb-1">{m.sender_name || m.sender_type}</p>
-                      <p>{m.message}</p>
-                    </div>
-                  ))
-                )}
-              </div>
-              <div className="flex gap-2">
-                <input
-                  value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
-                  placeholder="Type a message..."
-                  className="flex-1 px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[#800020]"
-                  onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                />
-                <button
-                  onClick={handleSendMessage}
-                  disabled={busy}
-                  className="px-4 py-2 bg-[#800020] text-white rounded-md text-sm hover:bg-[#4a0012] transition-colors flex items-center gap-1 disabled:opacity-60"
-                >
-                  <Send className="w-4 h-4" /> Send
-                </button>
-              </div>
-            </div>
+            {messagesPanel}
 
             {/* Reject Modal */}
             {showRejectModal && (
@@ -441,6 +450,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
         )}
 
         {view === 'invoice' && selectedInvoice && (
+          <div className="space-y-6">
           <div className="bg-white rounded-lg shadow-sm p-6">
             <div className="flex justify-between items-start mb-6">
               <div>
@@ -539,6 +549,12 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
                 </div>
               </div>
             )}
+          </div>
+
+          {actionError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm text-center">{actionError}</div>
+          )}
+          {messagesPanel}
           </div>
         )}
       </main>

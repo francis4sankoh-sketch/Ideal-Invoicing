@@ -345,23 +345,53 @@ export async function sendPaymentConfirmation(options: {
   });
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 export async function sendNewMessageNotification(options: {
   customerName: string;
-  quoteNumber: string;
+  documentLabel?: string;
+  quoteNumber?: string;
   messagePreview: string;
+  appPath?: string;
 }) {
+  const label = options.documentLabel || `Quote ${options.quoteNumber}`;
   return sendEmail({
     to: BUSINESS_EMAILS,
-    subject: `New message from ${options.customerName} on Quote ${options.quoteNumber}`,
+    subject: `New message from ${options.customerName} on ${label}`,
     html: emailWrapper(`
       <h2 style="color: #800020; font-family: Georgia, serif;">New Customer Message</h2>
       <div class="highlight">
-        <p><strong>${options.customerName}</strong> sent a message on <strong>${options.quoteNumber}</strong>:</p>
-        <p style="font-style: italic; margin-top: 8px;">"${options.messagePreview}"</p>
+        <p><strong>${escapeHtml(options.customerName)}</strong> sent a message on <strong>${escapeHtml(label)}</strong>:</p>
+        <p style="font-style: italic; margin-top: 8px;">"${escapeHtml(options.messagePreview)}"</p>
       </div>
       <div style="margin-top: 24px; text-align: center;">
-        <a href="${APP_URL}/quotes" class="btn">Reply in App</a>
+        <a href="${APP_URL}${options.appPath || '/quotes'}" class="btn">Reply in App</a>
       </div>
+    `),
+  });
+}
+
+export async function sendReplyToCustomer(options: {
+  customerEmail: string;
+  customerName: string;
+  documentLabel: string;
+  message: string;
+  portalUrl: string;
+}) {
+  return sendEmail({
+    to: options.customerEmail,
+    subject: `We've replied about your ${options.documentLabel}`,
+    html: emailWrapper(`
+      <h2 style="color: #800020; font-family: Georgia, serif;">You have a reply</h2>
+      <p style="font-size: 15px; line-height: 1.6;">Hi ${escapeHtml(options.customerName)},</p>
+      <p style="font-size: 15px; line-height: 1.6;">We've replied to your message about ${escapeHtml(options.documentLabel)}:</p>
+      <div class="highlight" style="margin: 20px 0; white-space: pre-wrap; font-size: 15px; line-height: 1.6;">${escapeHtml(options.message)}</div>
+      <div style="margin: 28px 0; text-align: center;">
+        <a href="${options.portalUrl}" class="btn">View and reply</a>
+      </div>
+      <p style="font-size: 15px; line-height: 1.6; margin-top: 24px;">Warm regards,<br><strong>The Ideal Events Hire Team</strong></p>
     `),
   });
 }
