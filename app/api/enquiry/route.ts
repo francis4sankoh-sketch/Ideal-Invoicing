@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { sendNewEnquiryNotification } from '@/lib/resend/emails';
+import { sendTelegram, enquiryAlertText } from '@/lib/notify/telegram';
 import { randomUUID } from 'crypto';
 
 type SelectedItemObj = {
@@ -342,6 +343,27 @@ export async function POST(request: NextRequest) {
       });
     } catch (emailErr) {
       console.error('Failed to send notification email:', emailErr);
+    }
+
+    // 5. Telegram alert to the owner's phone
+    try {
+      await sendTelegram(
+        enquiryAlertText({
+          name,
+          email,
+          phone,
+          event_type,
+          event_date,
+          event_location,
+          guest_count: guestCountStr,
+          budget_range: budgetRangeStr,
+          items: normaliseItems(selected_items),
+          notes: additional_notes,
+          appUrl: process.env.NEXT_PUBLIC_APP_URL || 'https://ideal-invoicing-delta.vercel.app',
+        })
+      );
+    } catch (telegramErr) {
+      console.error('Failed to send Telegram alert:', telegramErr);
     }
 
     return Response.json({
