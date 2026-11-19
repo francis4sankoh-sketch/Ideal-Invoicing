@@ -52,7 +52,11 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith('/api/products') ||
     pathname.startsWith('/api/portal') ||
     pathname.startsWith('/api/telegram') ||
-    pathname.startsWith('/api/calendar/feed/')
+    pathname.startsWith('/api/calendar/feed/') ||
+    // These check their own secret (Vercel Cron / Resend signature) instead of a login.
+    pathname.startsWith('/api/cron/') ||
+    pathname.startsWith('/api/resend/webhook') ||
+    pathname === '/manifest.webmanifest'
   ) {
     return supabaseResponse;
   }

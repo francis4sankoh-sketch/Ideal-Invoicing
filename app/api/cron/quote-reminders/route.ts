@@ -2,10 +2,12 @@ import { NextRequest } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { sendQuoteReminder } from '@/lib/resend/emails';
 import { formatDateAU } from '@/lib/utils/format';
+import { isCronRequest } from '@/lib/utils/cron';
 
 // Nudge config
 const DAYS_BETWEEN = 3; // wait this many days after send / last nudge
 const MAX_REMINDERS = 2; // stop after this many nudges
+const MAX_AGE_DAYS = 30; // never chase a quote sent longer ago than this
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://ideal-invoicing-delta.vercel.app';
 
@@ -15,9 +17,7 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://ideal-invoicing-delt
  * the MAX_REMINDERS cap. Triggered by Vercel Cron (see vercel.json).
  */
 export async function GET(request: NextRequest) {
-  // Vercel Cron sends a Bearer token equal to CRON_SECRET
-  const auth = request.headers.get('authorization');
-  if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!isCronRequest(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -46,8 +46,19 @@ export async function GET(request: NextRequest) {
       continue;
     }
 
-    // Respect the gap since send and since last reminder
+    // Never chase an expired or stale quote (the job was broken for months, so old ones piled up)
+    const today = now.toISOString().split('T')[0];
     const sentAt = q.sent_at ? new Date(q.sent_at) : null;
+    if (q.valid_until && q.valid_until < today) {
+      results.push({ quote: q.quote_number, sent: false, reason: 'expired' });
+      continue;
+    }
+    if (!sentAt || now.getTime() - sentAt.getTime() > MAX_AGE_DAYS * 24 * 60 * 60 * 1000) {
+      results.push({ quote: q.quote_number, sent: false, reason: 'too old' });
+      continue;
+    }
+
+    // Respect the gap since send and since last reminder
     if (sentAt && sentAt > cutoff) {
       results.push({ quote: q.quote_number, sent: false, reason: 'sent too recently' });
       continue;

@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
 import { Invoice, Customer, LineItem, Product, BusinessSettings, Expense, PaymentRecord, Appointment, QuoteMessage, PAYMENT_METHODS } from '@/types';
-import { formatCurrency, formatDateAU, formatDateDocument, generateId } from '@/lib/utils/format';
+import { formatCurrency, formatDateAU, formatDateDocument, formatDatetime, generateId } from '@/lib/utils/format';
 import {
   ArrowLeft, Send, Bell, MessageCircle, DollarSign, Ban, Copy, TrendingUp, TrendingDown, Receipt,
   Plus, Trash2, Pencil, CheckCircle2, Save, ChevronDown, ChevronUp, AlertTriangle, UserPlus,
@@ -32,6 +32,30 @@ import {
   localDate,
   moveToDate,
 } from '@/lib/utils/invoice-edit';
+
+const EMAIL_STATUS: Record<string, { label: string; className: string }> = {
+  sent: { label: 'Email sent', className: 'bg-blue-50 text-blue-700' },
+  delivered: { label: 'Email delivered', className: 'bg-green-50 text-green-700' },
+  delayed: { label: 'Email delayed', className: 'bg-amber-50 text-amber-700' },
+  bounced: { label: 'Email bounced', className: 'bg-red-100 text-red-700' },
+  failed: { label: 'Email failed', className: 'bg-red-100 text-red-700' },
+  complained: { label: 'Marked as spam', className: 'bg-red-100 text-red-700' },
+  suppressed: { label: 'Email blocked', className: 'bg-red-100 text-red-700' },
+};
+
+function EmailStatus({ status, at, detail }: { status?: string | null; at?: string | null; detail?: string | null }) {
+  const s = status ? EMAIL_STATUS[status] : null;
+  if (!s) return null;
+  const problem = s.className.includes('red');
+  return (
+    <span
+      className={`text-xs font-medium px-2 py-0.5 rounded-full ${s.className}`}
+      title={[at && `Updated ${formatDatetime(at)}`, detail, problem && 'Check the customer\'s email address, then use Send Invoice again.'].filter(Boolean).join('\n')}
+    >
+      {s.label}{at ? ` · ${formatDateAU(at)}` : ''}
+    </span>
+  );
+}
 
 export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -478,6 +502,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
     const emailError = await sendEmail({
       type: 'invoice_sent',
+      invoiceId: invoice.id,
       customerEmail: cust.email,
       customerName: cust.contact_name,
       invoiceNumber: invoice.invoice_number,
@@ -491,6 +516,8 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     setSendModalOpen(false);
     if (emailError) {
       alert(`The invoice is saved as sent, but the email to ${cust.email} didn't go out: ${emailError}\n\nUse Send Invoice to try again.`);
+    } else {
+      setInvoice((prev) => (prev ? { ...prev, email_status: 'sent', email_status_at: new Date().toISOString(), email_status_detail: null } : prev));
     }
     setSaving(false);
   };
@@ -859,6 +886,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
     const emailError = await sendEmail({
       type: 'invoice_sent',
+      invoiceId: invoice.id,
       customerEmail: customer.email,
       customerName: customer.contact_name,
       invoiceNumber: invoice.invoice_number,
@@ -873,6 +901,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     if (emailError) {
       alert(`The invoice email to ${customer.email} didn't go out: ${emailError}`);
     } else {
+      setInvoice({ ...invoice, email_status: 'sent', email_status_at: new Date().toISOString(), email_status_detail: null });
       setSendModalOpen(false);
     }
     setSaving(false);
@@ -890,6 +919,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
     const emailError = await sendEmail({
       type: 'payment_reminder',
+      invoiceId: invoice.id,
       customerEmail: customer.email,
       customerName: customer.contact_name,
       invoiceNumber: invoice.invoice_number,
@@ -1310,6 +1340,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             {invoice.invoice_number}
           </h2>
           <Badge status={invoice.status} />
+          <EmailStatus status={invoice.email_status} at={invoice.email_status_at} detail={invoice.email_status_detail} />
         </div>
         <div className="flex gap-2 flex-wrap">
           {invoice.status !== 'cancelled' && (

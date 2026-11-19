@@ -93,6 +93,9 @@ export interface Invoice {
   last_reminder_sent: string | null;
   view_history: string[];
   last_viewed: string | null;
+  email_status?: string | null;
+  email_status_at?: string | null;
+  email_status_detail?: string | null;
   created_at: string;
   updated_at: string;
   customer?: Customer;

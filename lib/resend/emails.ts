@@ -13,6 +13,8 @@ interface EmailOptions {
   subject: string;
   html: string;
   attachments?: Array<{ filename: string; content: Buffer }>;
+  // Lets the Resend webhook match delivery events back to an invoice (see app/api/resend/webhook)
+  invoiceId?: string;
 }
 
 async function sendEmail(options: EmailOptions) {
@@ -23,6 +25,7 @@ async function sendEmail(options: EmailOptions) {
       subject: options.subject,
       html: options.html,
       attachments: options.attachments,
+      tags: options.invoiceId && /^[\w-]+$/.test(options.invoiceId) ? [{ name: 'invoice_id', value: options.invoiceId }] : undefined,
     });
     if (error) throw error;
     return data;
@@ -247,8 +250,10 @@ export async function sendInvoiceToCustomer(options: {
   subject?: string;
   body?: string;
   pdfBuffer?: Buffer;
+  invoiceId?: string;
 }) {
   return sendEmail({
+    invoiceId: options.invoiceId,
     to: [options.customerEmail, ...BUSINESS_EMAILS],
     subject: options.subject || `Invoice ${options.invoiceNumber} from Ideal Events Hire`,
     html: emailWrapper(
@@ -290,8 +295,10 @@ export async function sendPaymentReminder(options: {
   dueDate: string;
   bankDetails: string;
   portalUrl: string;
+  invoiceId?: string;
 }) {
   return sendEmail({
+    invoiceId: options.invoiceId,
     to: options.customerEmail,
     subject: `Friendly reminder — Invoice ${options.invoiceNumber} is due ${options.dueDate}`,
     html: emailWrapper(`
@@ -393,5 +400,27 @@ export async function sendReplyToCustomer(options: {
       </div>
       <p style="font-size: 15px; line-height: 1.6; margin-top: 24px;">Warm regards,<br><strong>The Ideal Events Hire Team</strong></p>
     `),
+  });
+}
+
+export async function sendBackupEmail(options: {
+  takenAt: string;
+  counts: Record<string, number>;
+  filename: string;
+  content: Buffer;
+}) {
+  const rows = Object.entries(options.counts)
+    .map(([table, n]) => `<div class="detail-row"><span class="detail-label">${table.replace(/_/g, ' ')}:</span> <span class="detail-value">${n}</span></div>`)
+    .join('');
+  return sendEmail({
+    to: BUSINESS_EMAILS,
+    subject: `Weekly backup of Ideal Invoicing (${options.takenAt.slice(0, 10)})`,
+    html: emailWrapper(`
+      <h2 style="color: #800020; font-family: Georgia, serif;">Weekly data backup</h2>
+      <p style="font-size: 15px; line-height: 1.6;">Attached is a full copy of the app's data, taken ${options.takenAt.slice(0, 16).replace('T', ' ')} UTC. Keep this email: if anything is ever lost, the data can be restored from it.</p>
+      <div class="highlight" style="margin: 20px 0;">${rows}</div>
+      <p style="font-size: 13px; color: #666;">It contains customer details and bank details, so don't forward it.</p>
+    `),
+    attachments: [{ filename: options.filename, content: options.content }],
   });
 }

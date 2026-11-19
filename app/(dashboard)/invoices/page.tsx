@@ -179,7 +179,19 @@ export default function InvoicesPage() {
                     <td className="px-4 py-3 text-right text-green-600">{formatCurrency(inv.amount_paid)}</td>
                     <td className="px-4 py-3 text-right font-medium text-red-600">{formatCurrency(inv.balance_due)}</td>
                     <td className="px-4 py-3 text-[var(--color-text-muted)]">{inv.due_date ? formatDateAU(inv.due_date) : '—'}</td>
-                    <td className="px-4 py-3"><Badge status={inv.status} /></td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <Badge status={inv.status} />
+                        {['bounced', 'failed', 'complained', 'suppressed'].includes(inv.email_status || '') && (
+                          <span
+                            className="text-[11px] font-medium px-1.5 py-0.5 rounded-full bg-red-100 text-red-700"
+                            title={inv.email_status_detail || "The customer didn't receive the invoice email"}
+                          >
+                            Email {inv.email_status === 'complained' ? 'marked spam' : inv.email_status}
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => handleDelete(inv)}
