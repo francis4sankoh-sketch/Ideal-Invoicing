@@ -12,6 +12,12 @@ import { Expense, Quote, Invoice, EXPENSE_CATEGORIES } from '@/types';
 import { formatCurrency, formatDateAU } from '@/lib/utils/format';
 import { CreditCard, Plus, Search, Upload, Receipt, Link2 } from 'lucide-react';
 
+// Receipts are private: stored as a bucket path and opened through /api/receipts (signed link).
+// Old full URLs, if any, are opened as they are.
+function receiptLink(value: string) {
+  return /^https?:\/\//.test(value) ? value : `/api/receipts?path=${encodeURIComponent(value)}`;
+}
+
 export default function ExpensesPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -119,16 +125,23 @@ export default function ExpensesPage() {
     loadExpenses();
   };
 
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+
   const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    const ext = file.name.split('.').pop();
-    const path = `receipt-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('receipts').upload(path, file);
-    if (!error) {
-      const { data: { publicUrl } } = supabase.storage.from('receipts').getPublicUrl(path);
-      setForm({ ...form, receipt_url: publicUrl });
+    setUploadingReceipt(true);
+    const body = new FormData();
+    body.append('file', file);
+    const res = await fetch('/api/receipts', { method: 'POST', body });
+    const data = await res.json().catch(() => ({}));
+    setUploadingReceipt(false);
+    if (!res.ok) {
+      alert(`Receipt upload failed: ${data.error || res.status}`);
+      return;
     }
+    setForm((f) => ({ ...f, receipt_url: data.path }));
   };
 
   // Category totals
@@ -258,7 +271,7 @@ export default function ExpensesPage() {
                     <td className="px-4 py-3"><Badge status={e.status} /></td>
                     <td className="px-4 py-3">
                       {e.receipt_url ? (
-                        <a href={e.receipt_url} target="_blank" rel="noopener noreferrer" className="text-[var(--color-primary)] hover:underline text-xs" onClick={(ev) => ev.stopPropagation()}>
+                        <a href={receiptLink(e.receipt_url)} target="_blank" rel="noopener noreferrer" className="text-[var(--color-primary)] hover:underline text-xs" onClick={(ev) => ev.stopPropagation()}>
                           View
                         </a>
                       ) : '—'}
@@ -308,13 +321,13 @@ export default function ExpensesPage() {
           <div>
             <label className="block text-sm font-medium text-[var(--color-text)] mb-1">Receipt</label>
             {form.receipt_url && (
-              <a href={form.receipt_url} target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--color-primary)] hover:underline mb-2 block">
+              <a href={receiptLink(form.receipt_url)} target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--color-primary)] hover:underline mb-2 block">
                 View current receipt
               </a>
             )}
             <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-1.5 border border-[var(--color-border)] rounded-md text-sm hover:bg-[var(--color-bg-light)]">
-              <Upload className="w-4 h-4" /> Upload Receipt
-              <input type="file" accept="image/*" className="hidden" onChange={handleReceiptUpload} />
+              <Upload className="w-4 h-4" /> {uploadingReceipt ? 'Uploading…' : form.receipt_url ? 'Replace Receipt' : 'Upload Receipt'}
+              <input type="file" accept="image/*,application/pdf" className="hidden" onChange={handleReceiptUpload} disabled={uploadingReceipt} />
             </label>
           </div>
         </div>
