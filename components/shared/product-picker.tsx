@@ -62,7 +62,7 @@ export function ProductPicker({ open, onClose, products, onSelect }: ProductPick
               <div className="w-12 h-12 bg-[var(--color-bg-light)] rounded flex items-center justify-center shrink-0">
                 {p.photos?.[0] ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={p.photos[0]} alt="" className="w-full h-full object-cover rounded" />
+                  <img src={p.photos[0]} alt="" className="w-full h-full object-contain rounded" />
                 ) : (
                   <Package className="w-5 h-5 text-[var(--color-text-muted)]" />
                 )}

@@ -230,9 +230,10 @@ export default function ProductsPage() {
                 !p.is_active ? 'opacity-60' : ''
               }`}
             >
-              <div className="h-40 bg-[var(--color-bg-light)] flex items-center justify-center">
+              {/* Photos come in every shape (square, portrait, wide), so show the whole image rather than cropping it. */}
+              <div className="aspect-[4/3] bg-[var(--color-bg-light)] border-b border-[var(--color-border)] flex items-center justify-center">
                 {p.photos && p.photos.length > 0 ? (
-                  <img src={p.photos[0]} alt={p.name} className="h-full w-full object-cover" />
+                  <img src={p.photos[0]} alt={p.name} loading="lazy" className="h-full w-full object-contain" />
                 ) : (
                   <ImageIcon className="w-8 h-8 text-[var(--color-text-muted)]" />
                 )}
@@ -298,8 +299,8 @@ export default function ProductsPage() {
             <label className="block text-sm font-medium text-[var(--color-text)] mb-2">Photos</label>
             <div className="flex flex-wrap gap-2">
               {form.photos.map((url, i) => (
-                <div key={i} className="relative w-20 h-20 rounded overflow-hidden group">
-                  <img src={url} alt="" className="w-full h-full object-cover" />
+                <div key={i} className="relative w-24 h-24 rounded overflow-hidden group border border-[var(--color-border)] bg-[var(--color-bg-light)]">
+                  <img src={url} alt="" className="w-full h-full object-contain" />
                   <button
                     onClick={() => setForm({ ...form, photos: form.photos.filter((_, idx) => idx !== i) })}
                     className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
@@ -308,7 +309,7 @@ export default function ProductsPage() {
                   </button>
                 </div>
               ))}
-              <label className="w-20 h-20 border-2 border-dashed border-[var(--color-border)] rounded flex items-center justify-center cursor-pointer hover:border-[var(--color-primary)] transition-colors">
+              <label className="w-24 h-24 border-2 border-dashed border-[var(--color-border)] rounded flex items-center justify-center cursor-pointer hover:border-[var(--color-primary)] transition-colors">
                 <Plus className="w-5 h-5 text-[var(--color-text-muted)]" />
                 <input type="file" accept={ACCEPT_ATTR} multiple className="hidden" onChange={handlePhotoUpload} />
               </label>

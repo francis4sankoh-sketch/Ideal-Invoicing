@@ -78,27 +78,32 @@ function matchProduct(
   products: ProductRow[]
 ): ProductRow | null {
   if (!requestedName) return null;
-  const target = requestedName.toLowerCase().trim();
+  // Compare letters and numbers only, so "Tiffany Chair ·Ghost" finds "Tiffany Chair - Ghost/Clear"
+  // and "360° Photo Booth" finds "360 Photo Booth".
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const target = norm(requestedName);
+  if (!target) return null;
 
   // Exact match
-  const exact = products.find((p) => p.name.toLowerCase().trim() === target);
+  const exact = products.find((p) => norm(p.name) === target);
   if (exact) return exact;
 
   // Target contains product name, or product name contains target
-  const contained = products.find(
-    (p) => target.includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(target)
-  );
+  const contained = products.find((p) => {
+    const name = norm(p.name);
+    return !!name && (` ${target} `.includes(` ${name} `) || ` ${name} `.includes(` ${target} `));
+  });
   if (contained) return contained;
 
   // Token overlap — ignore short/common words
-  const stop = new Set(['the', 'a', 'and', 'or', 'of', 'with', 'for', '&']);
-  const targetTokens = target.split(/\s+/).filter((t) => t.length > 2 && !stop.has(t));
+  const stop = new Set(['the', 'and', 'with', 'for', 'hire', 'backdrop', 'backdrops', 'package', 'packages', 'set', 'sets']);
+  const targetTokens = target.split(' ').filter((t) => t.length > 2 && !stop.has(t));
   if (targetTokens.length === 0) return null;
 
   let bestScore = 0;
   let best: ProductRow | null = null;
   for (const p of products) {
-    const nameTokens = p.name.toLowerCase().split(/\s+/).filter((t) => t.length > 2 && !stop.has(t));
+    const nameTokens = norm(p.name).split(' ').filter((t) => t.length > 2 && !stop.has(t));
     const score = nameTokens.filter((t) => targetTokens.includes(t)).length;
     if (score > bestScore) {
       bestScore = score;
@@ -220,7 +225,8 @@ export async function POST(request: NextRequest) {
     try {
       const { data: products } = await supabase
         .from('products')
-        .select('id, name, default_price, description, photos');
+        .select('id, name, default_price, description, photos')
+        .eq('is_active', true);
 
       const { data: settings } = await supabase
         .from('business_settings')
