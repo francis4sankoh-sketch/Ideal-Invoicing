@@ -672,6 +672,11 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       return;
     }
     const settled = settleAfterEdit(editSnapshot.invoice, invoice.total, new Date().toISOString().split('T')[0]);
+    // An acceptance only covers the terms (and customer) it was given for.
+    const resetAcceptance =
+      !!editSnapshot.invoice.terms_accepted_at &&
+      ((editSnapshot.invoice.terms || '').trim() !== (invoice.terms || '').trim() ||
+        editSnapshot.invoice.customer_id !== invoice.customer_id);
     setSaving(true);
 
     const payload = {
@@ -693,6 +698,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
       notes: invoice.notes,
       terms: invoice.terms,
       ...settled,
+      ...(resetAcceptance ? { terms_accepted_at: null, terms_accepted_by: null, terms_accepted_ip: null } : {}),
     };
 
     const { error } = await supabase.from('invoices').update(payload).eq('id', invoice.id);
@@ -727,7 +733,10 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
     setEditSnapshot(null);
     setEditingSent(false);
-    setJustSaved(`Invoice updated.${calendarNote}`);
+    const acceptanceNote = resetAcceptance
+      ? ' The terms changed, so the customer will need to accept the invoice again. Use Send Updated Invoice to let them know.'
+      : '';
+    setJustSaved(`Invoice updated.${acceptanceNote}${calendarNote}`);
     setSaving(false);
   };
 
@@ -1341,6 +1350,18 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           </h2>
           <Badge status={invoice.status} />
           <EmailStatus status={invoice.email_status} at={invoice.email_status_at} detail={invoice.email_status_detail} />
+          {invoice.terms_accepted_at ? (
+            <span
+              className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700"
+              title={[`Accepted ${formatDatetime(invoice.terms_accepted_at)}`, invoice.terms_accepted_by && `Signed as ${invoice.terms_accepted_by}`, invoice.terms_accepted_ip && `IP ${invoice.terms_accepted_ip}`].filter(Boolean).join('\n')}
+            >
+              Accepted by {invoice.terms_accepted_by || 'customer'} · {formatDateAU(invoice.terms_accepted_at)}
+            </span>
+          ) : invoice.status !== 'draft' && invoice.status !== 'cancelled' && invoice.terms?.trim() ? (
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600" title="The customer hasn't accepted this invoice and its terms yet.">
+              Not accepted yet
+            </span>
+          ) : null}
         </div>
         <div className="flex gap-2 flex-wrap">
           {invoice.status !== 'cancelled' && (

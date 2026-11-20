@@ -228,6 +228,14 @@ export function InvoicePDF({ invoice, settings }: InvoicePDFProps) {
           </View>
         ) : null}
 
+        {invoice.terms_accepted_at ? (
+          <View wrap={false}>
+            <Text style={styles.sectionText}>
+              Accepted online by {invoice.terms_accepted_by || 'the customer'} on {formatDatePDF(invoice.terms_accepted_at)}.
+            </Text>
+          </View>
+        ) : null}
+
         {/* Footer */}
         <Text style={styles.footer} fixed>
           {settings.business_name}{settings.email ? ` | ${settings.email}` : ''}{settings.phone ? ` | ${settings.phone}` : ''}{settings.website ? ` | ${settings.website}` : ''}

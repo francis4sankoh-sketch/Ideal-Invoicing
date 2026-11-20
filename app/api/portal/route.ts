@@ -4,6 +4,7 @@ import {
   sendQuoteAcceptedNotification,
   sendQuoteRejectedNotification,
   sendNewMessageNotification,
+  sendInvoiceAcceptedNotification,
 } from '@/lib/resend/emails';
 import { formatCurrency } from '@/lib/utils/format';
 import { sendTelegram } from '@/lib/notify/telegram';
@@ -14,7 +15,17 @@ import { customerMessageAlert, threadColumn, type ThreadKind } from '@/lib/messa
 
 const CUSTOMER_FIELDS = 'id, contact_name, business_name, email';
 const SETTINGS_FIELDS =
-  'business_name, abn, logo_url, email, phone, bank_name, account_name, bsb, account_number, bank_reference_note';
+  'business_name, abn, logo_url, email, phone, address, city, state, postcode, website, bank_name, account_name, bsb, account_number, bank_reference_note';
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://ideal-invoicing-delta.vercel.app';
+
+function melbourneTime(iso: string) {
+  return new Intl.DateTimeFormat('en-AU', {
+    timeZone: 'Australia/Melbourne',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(iso));
+}
 
 type Supabase = Awaited<ReturnType<typeof createServiceRoleClient>>;
 
@@ -125,6 +136,63 @@ export async function POST(request: NextRequest) {
           console.error(`Quote ${status} notification failed:`, err);
         }
         return Response.json({ success: true, status });
+      }
+
+      case 'accept_invoice': {
+        const invoice = await ownDoc(supabase, customer.id, 'invoice', body.invoiceId);
+        if (!invoice) return Response.json({ error: 'Not found' }, { status: 404 });
+        const name = typeof body.name === 'string' ? body.name.trim().replace(/\s+/g, ' ').slice(0, 120) : '';
+        if (body.agreed !== true) {
+          return Response.json({ error: 'Please tick the box to agree to the Terms and Conditions' }, { status: 400 });
+        }
+        if (name.length < 2) return Response.json({ error: 'Please type your full name' }, { status: 400 });
+        if (invoice.status === 'cancelled') {
+          return Response.json({ error: 'This invoice has been cancelled' }, { status: 409 });
+        }
+        if (!invoice.terms?.trim()) {
+          return Response.json({ error: 'This invoice has no terms to accept' }, { status: 409 });
+        }
+        if (invoice.terms_accepted_at) {
+          return Response.json({ error: 'This invoice has already been accepted' }, { status: 409 });
+        }
+
+        const acceptedAt = new Date().toISOString();
+        const ip = (request.headers.get('x-forwarded-for') || '').split(',')[0].trim().slice(0, 64) || null;
+        // The null check makes a double-click (or two tabs) record only one acceptance.
+        const { data: updated, error } = await supabase
+          .from('invoices')
+          .update({ terms_accepted_at: acceptedAt, terms_accepted_by: name, terms_accepted_ip: ip })
+          .eq('id', invoice.id)
+          .is('terms_accepted_at', null)
+          .select('terms_accepted_at, terms_accepted_by')
+          .maybeSingle();
+        if (error) return Response.json({ error: error.message }, { status: 500 });
+        if (!updated) return Response.json({ error: 'This invoice has already been accepted' }, { status: 409 });
+
+        const when = melbourneTime(acceptedAt);
+        const total = formatCurrency(invoice.total);
+        const [emailResult, telegramResult] = await Promise.allSettled([
+          sendInvoiceAcceptedNotification({
+            customerName: customer.contact_name,
+            acceptedName: name,
+            invoiceNumber: invoice.invoice_number,
+            total,
+            acceptedAt: when,
+            invoiceId: invoice.id,
+          }),
+          sendTelegram(
+            [
+              `Invoice accepted: ${invoice.invoice_number}`,
+              `${customer.contact_name} agreed to the Terms and Conditions (signed as "${name}").`,
+              `Total ${total} · ${when}`,
+              '',
+              `${APP_URL}/invoices/${invoice.id}`,
+            ].join('\n')
+          ),
+        ]);
+        if (emailResult.status === 'rejected') console.error('Invoice accepted email failed:', emailResult.reason);
+        if (telegramResult.status === 'rejected') console.error('Invoice accepted Telegram alert failed:', telegramResult.reason);
+        return Response.json({ success: true, ...updated });
       }
 
       case 'send_message': {

@@ -5,9 +5,9 @@ import { useSearchParams } from 'next/navigation';
 import { Customer, Quote, Invoice, QuoteMessage, BusinessSettings } from '@/types';
 
 type PortalCustomer = Pick<Customer, 'id' | 'contact_name' | 'business_name' | 'email'>;
-import { formatCurrency, formatDateDocument, formatDateAU } from '@/lib/utils/format';
+import { formatCurrency, formatDateDocument } from '@/lib/utils/format';
 import { Badge } from '@/components/ui/badge';
-import { Check, X, MessageCircle, FileText, Receipt, Send } from 'lucide-react';
+import { Check, X, MessageCircle, FileText, Receipt, Send, Download } from 'lucide-react';
 
 export default function PortalPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
@@ -30,6 +30,9 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
   const [view, setView] = useState<'home' | 'quote' | 'invoice'>('home');
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [agreed, setAgreed] = useState(false);
+  const [acceptName, setAcceptName] = useState('');
+  const [downloading, setDownloading] = useState(false);
 
   // Everything goes through /api/portal, which checks the token server-side.
   const portal = async <T,>(action: string, extra: Record<string, unknown> = {}): Promise<T> => {
@@ -49,6 +52,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
     try {
       const data = await portal<{ customer: PortalCustomer; quotes: Quote[]; invoices: Invoice[]; settings: BusinessSettings | null }>('load');
       setCustomer(data.customer);
+      setAcceptName(data.customer.contact_name || '');
       setQuotes(data.quotes);
       setInvoices(data.invoices);
       setSettings(data.settings);
@@ -96,6 +100,48 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
   };
 
   const handleAcceptQuote = () => answerQuote('accept_quote');
+
+  const handleAcceptInvoice = async () => {
+    if (!selectedInvoice || busy) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      const data = await portal<{ terms_accepted_at: string; terms_accepted_by: string }>('accept_invoice', {
+        invoiceId: selectedInvoice.id,
+        name: acceptName,
+        agreed,
+      });
+      const updated = { ...selectedInvoice, ...data };
+      setSelectedInvoice(updated);
+      setInvoices((list) => list.map((i) => (i.id === updated.id ? updated : i)));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Something went wrong');
+    }
+    setBusy(false);
+  };
+
+  // The PDF library is large, so it only loads when someone asks for a PDF.
+  const handleDownloadInvoice = async () => {
+    if (!selectedInvoice || !settings || downloading) return;
+    setDownloading(true);
+    try {
+      const [{ pdf }, { InvoicePDF }] = await Promise.all([import('@react-pdf/renderer'), import('@/lib/pdf/invoice-pdf')]);
+      const doc = <InvoicePDF invoice={{ ...selectedInvoice, customer: customer as Customer }} settings={settings} />;
+      const blob = await pdf(doc).toBlob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${selectedInvoice.invoice_number}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('PDF generation failed:', err);
+      setActionError('The PDF could not be created. Please try again.');
+    }
+    setDownloading(false);
+  };
   const handleRejectQuote = () => answerQuote('reject_quote');
 
   const handleSendMessage = async () => {
@@ -129,6 +175,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
 
   const openInvoice = (inv: Invoice) => {
     setSelectedInvoice(inv);
+    setAgreed(false);
     setView('invoice');
     openThread('invoice', inv.id);
   };
@@ -468,6 +515,15 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
                   Issued: {selectedInvoice.issue_date ? formatDateDocument(selectedInvoice.issue_date) : 'N/A'}<br />
                   Due: {selectedInvoice.due_date ? formatDateDocument(selectedInvoice.due_date) : 'N/A'}
                 </p>
+                {settings && (
+                  <button
+                    onClick={handleDownloadInvoice}
+                    disabled={downloading}
+                    className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 border border-[#800020] text-[#800020] rounded-md text-xs font-medium hover:bg-[#fdf0ef] transition-colors disabled:opacity-60"
+                  >
+                    <Download className="w-3.5 h-3.5" /> {downloading ? 'Preparing PDF…' : 'Download PDF'}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -549,11 +605,74 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
                 </div>
               </div>
             )}
+
+            {selectedInvoice.notes && (
+              <div className="mt-6 text-sm text-gray-600 whitespace-pre-line">
+                <strong>Notes:</strong> {selectedInvoice.notes}
+              </div>
+            )}
+
+            {selectedInvoice.terms?.trim() && (
+              <details className="mt-6 border border-gray-200 rounded-md group" open={!selectedInvoice.terms_accepted_at}>
+                <summary className="cursor-pointer select-none px-4 py-3 text-sm font-bold text-[#800020] flex items-center justify-between">
+                  Terms and Conditions
+                  <span className="text-xs font-normal text-gray-500 group-open:hidden">Show</span>
+                  <span className="text-xs font-normal text-gray-500 hidden group-open:inline">Hide</span>
+                </summary>
+                <div className="px-4 pb-4 max-h-96 overflow-y-auto text-xs leading-relaxed text-gray-600 whitespace-pre-line border-t border-gray-100 pt-3">
+                  {selectedInvoice.terms.trim()}
+                </div>
+              </details>
+            )}
           </div>
 
           {actionError && (
             <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm text-center">{actionError}</div>
           )}
+
+          {selectedInvoice.terms_accepted_at ? (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+              <Check className="w-8 h-8 text-green-600 mx-auto mb-2" />
+              <p className="text-sm font-medium text-green-700">
+                You accepted this invoice and our Terms and Conditions on {formatDateDocument(selectedInvoice.terms_accepted_at)}
+                {selectedInvoice.terms_accepted_by ? `, signed as ${selectedInvoice.terms_accepted_by}` : ''}. Thank you!
+              </p>
+            </div>
+          ) : selectedInvoice.status !== 'cancelled' && selectedInvoice.terms?.trim() ? (
+            <div className="bg-white rounded-lg shadow-sm p-6">
+              <h3 className="font-bold text-[#800020] mb-1" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
+                Confirm your booking
+              </h3>
+              <p className="text-sm text-gray-500 mb-4">Please read the Terms and Conditions above, then accept this invoice.</p>
+              <label className="flex items-start gap-3 text-sm mb-4 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={agreed}
+                  onChange={(e) => setAgreed(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-[#800020]"
+                />
+                <span>I have read and agree to the Terms and Conditions of hire.</span>
+              </label>
+              <label className="block text-sm mb-1 text-gray-600" htmlFor="accept-name">Your full name</label>
+              <input
+                id="accept-name"
+                value={acceptName}
+                onChange={(e) => setAcceptName(e.target.value)}
+                autoComplete="name"
+                className="w-full sm:w-80 px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[#800020] mb-4"
+              />
+              <div>
+                <button
+                  onClick={handleAcceptInvoice}
+                  disabled={busy || !agreed || acceptName.trim().length < 2}
+                  className="flex items-center gap-2 px-8 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Check className="w-5 h-5" /> Accept Invoice
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           {messagesPanel}
           </div>
         )}

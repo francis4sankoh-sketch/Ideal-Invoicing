@@ -96,6 +96,9 @@ export interface Invoice {
   email_status?: string | null;
   email_status_at?: string | null;
   email_status_detail?: string | null;
+  terms_accepted_at?: string | null;
+  terms_accepted_by?: string | null;
+  terms_accepted_ip?: string | null;
   created_at: string;
   updated_at: string;
   customer?: Customer;

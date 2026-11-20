@@ -272,9 +272,9 @@ export async function sendInvoiceToCustomer(options: {
       <h3 style="margin-top: 24px; color: #800020; font-family: Georgia, serif;">Payment Details</h3>
       <p style="font-size: 14px; line-height: 1.6; color: #555;">Please use the bank details below to make your payment. Don't forget to include the invoice number as your payment reference so we can match it to your booking.</p>
       ${options.bankDetails}
-      <p style="font-size: 15px; line-height: 1.6; margin-top: 20px;">You can view the full invoice, including a complete breakdown of all items, by clicking the button below:</p>
+      <p style="font-size: 15px; line-height: 1.6; margin-top: 20px;">Please open your invoice using the button below. You'll see the full list of items and our hire Terms and Conditions. Once you've read them, tick the box and press <strong>Accept Invoice</strong> to confirm your booking. You can also download a PDF copy from the same page.</p>
       <div style="margin: 28px 0; text-align: center;">
-        <a href="${options.portalUrl}" class="btn">View Your Invoice</a>
+        <a href="${options.portalUrl}" class="btn">View &amp; Accept Your Invoice</a>
       </div>
       <p style="font-size: 15px; line-height: 1.6;">If you have any questions about this invoice or your upcoming event, please don't hesitate to reply to this email. We're here to help!</p>
       <p style="font-size: 15px; line-height: 1.6; margin-top: 24px;">Warm regards,<br><strong>The Ideal Events Hire Team</strong><br>
@@ -284,6 +284,35 @@ export async function sendInvoiceToCustomer(options: {
     attachments: options.pdfBuffer
       ? [{ filename: `${options.invoiceNumber}.pdf`, content: options.pdfBuffer }]
       : undefined,
+  });
+}
+
+export async function sendInvoiceAcceptedNotification(options: {
+  customerName: string;
+  acceptedName: string;
+  invoiceNumber: string;
+  total: string;
+  acceptedAt: string;
+  invoiceId: string;
+}) {
+  const name = escapeHtml(options.customerName);
+  return sendEmail({
+    to: BUSINESS_EMAILS,
+    subject: `${options.customerName} has accepted Invoice ${options.invoiceNumber}`,
+    html: emailWrapper(`
+      <h2 style="color: #22c55e; font-family: Georgia, serif;">Invoice Accepted</h2>
+      <div class="highlight">
+        <p><strong>${name}</strong> has accepted <strong>${escapeHtml(options.invoiceNumber)}</strong> and agreed to your Terms and Conditions.</p>
+      </div>
+      <div style="margin-top: 16px;">
+        <div class="detail-row"><span class="detail-label">Signed as:</span> <span class="detail-value">${escapeHtml(options.acceptedName)}</span></div>
+        <div class="detail-row"><span class="detail-label">Accepted:</span> <span class="detail-value">${escapeHtml(options.acceptedAt)}</span></div>
+        <div class="detail-row"><span class="detail-label">Total:</span> <span class="detail-value">${escapeHtml(options.total)}</span></div>
+      </div>
+      <div style="margin-top: 24px; text-align: center;">
+        <a href="${APP_URL}/invoices/${options.invoiceId}" class="btn">View Invoice</a>
+      </div>
+    `),
   });
 }
 
