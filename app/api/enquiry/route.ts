@@ -2,7 +2,10 @@ import { NextRequest } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { sendNewEnquiryNotification } from '@/lib/resend/emails';
 import { sendTelegram, enquiryAlertText } from '@/lib/notify/telegram';
-import { randomUUID } from 'crypto';
+import { findOrgBySecret, getDefaultOrg, loadBrand, type Organization } from '@/lib/org/server';
+import { APP_URL } from '@/lib/app-config';
+import { randomUUID, timingSafeEqual } from 'crypto';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 type SelectedItemObj = {
   // Supports the new website ({product_id, product_name, quantity}),
@@ -113,12 +116,25 @@ function matchProduct(
   return bestScore > 0 ? best : null;
 }
 
+// Each business's website sends its own secret (organizations.enquiry_api_key) in x-api-secret,
+// which decides whose enquiry this is. The original business's old secret (ENQUIRY_API_SECRET)
+// still works, so its live website needs no change.
+async function orgForSecret(supabase: SupabaseClient, secret: string): Promise<Organization | null> {
+  const legacy = process.env.ENQUIRY_API_SECRET;
+  if (legacy && secret.length === legacy.length && timingSafeEqual(Buffer.from(secret), Buffer.from(legacy))) {
+    return getDefaultOrg(supabase);
+  }
+  return findOrgBySecret(supabase, 'enquiry_api_key', secret);
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const apiSecret = request.headers.get('x-api-secret');
-    if (apiSecret !== process.env.ENQUIRY_API_SECRET) {
+    const supabase = await createServiceRoleClient();
+    const org = await orgForSecret(supabase, request.headers.get('x-api-secret') || '');
+    if (!org) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const orgId = org.id;
 
     const body = await request.json();
     const {
@@ -160,14 +176,15 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Name and email are required' }, { status: 400 });
     }
 
-    const supabase = await createServiceRoleClient();
     const emailNormalised = email.toLowerCase().trim();
 
     // 1. Find or create customer
     const { data: existingCustomer } = await supabase
       .from('customers')
       .select('*')
+      .eq('organization_id', orgId)
       .eq('email', emailNormalised)
+      .limit(1)
       .maybeSingle();
 
     let customerId: string;
@@ -177,6 +194,7 @@ export async function POST(request: NextRequest) {
       const { data: newCustomer, error: custError } = await supabase
         .from('customers')
         .insert({
+          organization_id: orgId,
           contact_name: name,
           email: emailNormalised,
           phone: phone || null,
@@ -195,6 +213,7 @@ export async function POST(request: NextRequest) {
     const { data: enquiry, error: enqError } = await supabase
       .from('website_enquiries')
       .insert({
+        organization_id: orgId,
         customer_id: customerId,
         name,
         email: emailNormalised,
@@ -226,13 +245,14 @@ export async function POST(request: NextRequest) {
       const { data: products } = await supabase
         .from('products')
         .select('id, name, default_price, description, photos')
+        .eq('organization_id', orgId)
         .eq('is_active', true);
 
       const { data: settings } = await supabase
         .from('business_settings')
         .select('id, invoice_prefix, next_invoice_number, default_terms')
-        .limit(1)
-        .single();
+        .eq('organization_id', orgId)
+        .maybeSingle();
 
       if (settings) {
         const invoiceNumber = `${settings.invoice_prefix}-${settings.next_invoice_number}`;
@@ -280,6 +300,7 @@ export async function POST(request: NextRequest) {
         const { data: invoice, error: invoiceErr } = await supabase
           .from('invoices')
           .insert({
+            organization_id: orgId,
             invoice_number: invoiceNumber,
             customer_id: customerId,
             title,
@@ -332,7 +353,7 @@ export async function POST(request: NextRequest) {
 
     // 4. Send notification email
     try {
-      await sendNewEnquiryNotification({
+      await sendNewEnquiryNotification(await loadBrand(supabase, orgId), {
         name,
         email,
         event_type,
@@ -351,9 +372,9 @@ export async function POST(request: NextRequest) {
       console.error('Failed to send notification email:', emailErr);
     }
 
-    // 5. Telegram alert to the owner's phone
+    // 5. Telegram alert to the owner's phone (the Telegram bot belongs to the original business)
     try {
-      await sendTelegram(
+      if (org.is_default) await sendTelegram(
         enquiryAlertText({
           name,
           email,
@@ -365,7 +386,7 @@ export async function POST(request: NextRequest) {
           budget_range: budgetRangeStr,
           items: normaliseItems(selected_items),
           notes: additional_notes,
-          appUrl: process.env.NEXT_PUBLIC_APP_URL || 'https://ideal-invoicing-delta.vercel.app',
+          appUrl: APP_URL,
         })
       );
     } catch (telegramErr) {

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { clearCache } from '@/lib/utils/cache';
+import { APP_NAME } from '@/lib/app-config';
 import {
   LayoutDashboard,
   Users,
@@ -38,11 +39,15 @@ const navItems = [
 
 interface SidebarProps {
   userEmail?: string;
+  businessName?: string;
   open: boolean;
   onClose: () => void;
 }
 
-export function Sidebar({ userEmail, open, onClose }: SidebarProps) {
+// "Ideal Invoicing" shows as a large "Ideal" over a small "Invoicing".
+const [APP_WORD, ...APP_REST] = APP_NAME.split(' ');
+
+export function Sidebar({ userEmail, businessName, open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
@@ -81,14 +86,16 @@ export function Sidebar({ userEmail, open, onClose }: SidebarProps) {
               className="text-xl font-bold text-white leading-tight"
               style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}
             >
-              Ideal
+              {APP_WORD}
             </h1>
-            <p
-              className="text-[10px] tracking-[0.25em] uppercase text-white/70"
-              style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
-            >
-              Invoicing
-            </p>
+            {APP_REST.length > 0 && (
+              <p
+                className="text-[10px] tracking-[0.25em] uppercase text-white/70"
+                style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
+              >
+                {APP_REST.join(' ')}
+              </p>
+            )}
           </div>
           <button onClick={onClose} className="lg:hidden text-white/70 hover:text-white">
             <X className="w-5 h-5" />
@@ -120,6 +127,9 @@ export function Sidebar({ userEmail, open, onClose }: SidebarProps) {
 
         {/* User + Logout */}
         <div className="px-3 py-4 border-t border-white/10">
+          {businessName && (
+            <p className="text-xs font-medium text-white/90 truncate px-3">{businessName}</p>
+          )}
           {userEmail && (
             <p className="text-xs text-white/60 truncate px-3 mb-2">{userEmail}</p>
           )}

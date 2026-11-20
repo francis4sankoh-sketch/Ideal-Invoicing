@@ -9,15 +9,16 @@ import {
 import { formatCurrency } from '@/lib/utils/format';
 import { sendTelegram } from '@/lib/notify/telegram';
 import { customerMessageAlert, threadColumn, type ThreadKind } from '@/lib/messages/thread';
+import { getOrg, loadBrand } from '@/lib/org/server';
+import { APP_URL } from '@/lib/app-config';
 
 // The portal has no login: the customer's portal_token is the only credential, so every
-// action re-checks it and only ever touches that customer's own quotes and invoices.
+// action re-checks it and only ever touches that customer's own quotes and invoices, inside the
+// business the customer belongs to.
 
-const CUSTOMER_FIELDS = 'id, contact_name, business_name, email';
+const CUSTOMER_FIELDS = 'id, organization_id, contact_name, business_name, email';
 const SETTINGS_FIELDS =
-  'business_name, abn, logo_url, email, phone, address, city, state, postcode, website, bank_name, account_name, bsb, account_number, bank_reference_note';
-
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://ideal-invoicing-delta.vercel.app';
+  'business_name, abn, logo_url, email, phone, address, city, state, postcode, website, brand_color, bank_name, account_name, bsb, account_number, bank_reference_note';
 
 function melbourneTime(iso: string) {
   return new Intl.DateTimeFormat('en-AU', {
@@ -29,20 +30,29 @@ function melbourneTime(iso: string) {
 
 type Supabase = Awaited<ReturnType<typeof createServiceRoleClient>>;
 
-async function ownDoc(supabase: Supabase, customerId: string, kind: ThreadKind, id: unknown) {
+type PortalCustomer = { id: string; organization_id: string };
+
+async function ownDoc(supabase: Supabase, customer: PortalCustomer, kind: ThreadKind, id: unknown) {
   if (typeof id !== 'string' || !id) return null;
   const { data } = await supabase
     .from(kind === 'quote' ? 'quotes' : 'invoices')
     .select('*')
     .eq('id', id)
-    .eq('customer_id', customerId)
+    .eq('organization_id', customer.organization_id)
+    .eq('customer_id', customer.id)
     .neq('status', 'draft')
     .maybeSingle();
   return data;
 }
 
-const ownQuote = (supabase: Supabase, customerId: string, quoteId: unknown) =>
-  ownDoc(supabase, customerId, 'quote', quoteId);
+const ownQuote = (supabase: Supabase, customer: PortalCustomer, quoteId: unknown) =>
+  ownDoc(supabase, customer, 'quote', quoteId);
+
+// The Telegram bot belongs to the original business, so only its alerts go there.
+async function alertOwner(supabase: Supabase, orgId: string, text: string) {
+  const org = await getOrg(supabase, orgId);
+  if (org?.is_default) await sendTelegram(text);
+}
 
 function threadKind(value: unknown): ThreadKind | null {
   return value === 'quote' || value === 'invoice' ? value : null;
@@ -71,12 +81,17 @@ export async function POST(request: NextRequest) {
     switch (action) {
       case 'load': {
         const [quotesRes, invoicesRes, settingsRes] = await Promise.all([
-          supabase.from('quotes').select('*').eq('customer_id', customer.id).neq('status', 'draft').order('created_at', { ascending: false }),
-          supabase.from('invoices').select('*').eq('customer_id', customer.id).neq('status', 'draft').order('created_at', { ascending: false }),
-          supabase.from('business_settings').select(SETTINGS_FIELDS).limit(1).maybeSingle(),
+          supabase.from('quotes').select('*').eq('organization_id', customer.organization_id).eq('customer_id', customer.id).neq('status', 'draft').order('created_at', { ascending: false }),
+          supabase.from('invoices').select('*').eq('organization_id', customer.organization_id).eq('customer_id', customer.id).neq('status', 'draft').order('created_at', { ascending: false }),
+          supabase.from('business_settings').select(SETTINGS_FIELDS).eq('organization_id', customer.organization_id).maybeSingle(),
         ]);
         return Response.json({
-          customer,
+          customer: {
+            id: customer.id,
+            contact_name: customer.contact_name,
+            business_name: customer.business_name,
+            email: customer.email,
+          },
           quotes: quotesRes.data || [],
           invoices: invoicesRes.data || [],
           settings: settingsRes.data,
@@ -85,7 +100,7 @@ export async function POST(request: NextRequest) {
 
       case 'load_messages': {
         const kind = threadKind(body.kind);
-        const doc = kind ? await ownDoc(supabase, customer.id, kind, body.id) : null;
+        const doc = kind ? await ownDoc(supabase, customer, kind, body.id) : null;
         if (!kind || !doc) return Response.json({ error: 'Not found' }, { status: 404 });
         const { data } = await supabase
           .from('quote_messages')
@@ -102,13 +117,14 @@ export async function POST(request: NextRequest) {
           .from(table)
           .update({ last_viewed: new Date().toISOString() })
           .eq('id', body.id)
+          .eq('organization_id', customer.organization_id)
           .eq('customer_id', customer.id);
         return Response.json({ success: true });
       }
 
       case 'accept_quote':
       case 'reject_quote': {
-        const quote = await ownQuote(supabase, customer.id, body.quoteId);
+        const quote = await ownQuote(supabase, customer, body.quoteId);
         if (!quote) return Response.json({ error: 'Not found' }, { status: 404 });
         if (quote.status !== 'sent') {
           return Response.json({ error: 'This quote can no longer be changed' }, { status: 409 });
@@ -118,15 +134,16 @@ export async function POST(request: NextRequest) {
         if (error) return Response.json({ error: error.message }, { status: 500 });
 
         try {
+          const brand = await loadBrand(supabase, customer.organization_id);
           if (status === 'accepted') {
-            await sendQuoteAcceptedNotification({
+            await sendQuoteAcceptedNotification(brand, {
               customerName: customer.contact_name,
               quoteNumber: quote.quote_number,
               total: formatCurrency(quote.total),
               depositAmount: formatCurrency(quote.deposit_amount),
             });
           } else {
-            await sendQuoteRejectedNotification({
+            await sendQuoteRejectedNotification(brand, {
               customerName: customer.contact_name,
               quoteNumber: quote.quote_number,
               reason: typeof body.reason === 'string' ? body.reason.slice(0, 2000) : undefined,
@@ -139,7 +156,7 @@ export async function POST(request: NextRequest) {
       }
 
       case 'accept_invoice': {
-        const invoice = await ownDoc(supabase, customer.id, 'invoice', body.invoiceId);
+        const invoice = await ownDoc(supabase, customer, 'invoice', body.invoiceId);
         if (!invoice) return Response.json({ error: 'Not found' }, { status: 404 });
         const name = typeof body.name === 'string' ? body.name.trim().replace(/\s+/g, ' ').slice(0, 120) : '';
         if (body.agreed !== true) {
@@ -171,8 +188,9 @@ export async function POST(request: NextRequest) {
 
         const when = melbourneTime(acceptedAt);
         const total = formatCurrency(invoice.total);
+        const brand = await loadBrand(supabase, customer.organization_id);
         const [emailResult, telegramResult] = await Promise.allSettled([
-          sendInvoiceAcceptedNotification({
+          sendInvoiceAcceptedNotification(brand, {
             customerName: customer.contact_name,
             acceptedName: name,
             invoiceNumber: invoice.invoice_number,
@@ -180,7 +198,9 @@ export async function POST(request: NextRequest) {
             acceptedAt: when,
             invoiceId: invoice.id,
           }),
-          sendTelegram(
+          alertOwner(
+            supabase,
+            customer.organization_id,
             [
               `Invoice accepted: ${invoice.invoice_number}`,
               `${customer.contact_name} agreed to the Terms and Conditions (signed as "${name}").`,
@@ -197,12 +217,13 @@ export async function POST(request: NextRequest) {
 
       case 'send_message': {
         const kind = threadKind(body.kind);
-        const doc = kind ? await ownDoc(supabase, customer.id, kind, body.id) : null;
+        const doc = kind ? await ownDoc(supabase, customer, kind, body.id) : null;
         const message = typeof body.message === 'string' ? body.message.trim().slice(0, 5000) : '';
         if (!kind || !doc) return Response.json({ error: 'Not found' }, { status: 404 });
         if (!message) return Response.json({ error: 'Message is empty' }, { status: 400 });
 
         const { error } = await supabase.from('quote_messages').insert({
+          organization_id: customer.organization_id,
           [threadColumn(kind)]: doc.id,
           sender_type: 'customer',
           sender_name: customer.contact_name,
@@ -212,14 +233,19 @@ export async function POST(request: NextRequest) {
 
         const number = kind === 'quote' ? doc.quote_number : doc.invoice_number;
         const label = `${kind === 'quote' ? 'quote' : 'invoice'} ${number}`;
+        const brand = await loadBrand(supabase, customer.organization_id);
         const [emailResult, telegramResult] = await Promise.allSettled([
-          sendNewMessageNotification({
+          sendNewMessageNotification(brand, {
             customerName: customer.contact_name,
             documentLabel: label,
             messagePreview: message.slice(0, 100),
             appPath: `/${kind === 'quote' ? 'quotes' : 'invoices'}/${doc.id}`,
           }),
-          sendTelegram(customerMessageAlert({ customerName: customer.contact_name, label, message, kind, id: doc.id })),
+          alertOwner(
+            supabase,
+            customer.organization_id,
+            customerMessageAlert({ customerName: customer.contact_name, label, message, kind, id: doc.id })
+          ),
         ]);
         if (emailResult.status === 'rejected') console.error('New message email failed:', emailResult.reason);
         if (telegramResult.status === 'rejected') console.error('New message Telegram alert failed:', telegramResult.reason);

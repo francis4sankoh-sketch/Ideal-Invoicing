@@ -7,6 +7,7 @@ import { Input, Textarea, Select } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { AUSTRALIAN_STATES, BusinessSettings } from '@/types';
 import { invalidate } from '@/lib/utils/cache';
+import { orgFolder } from '@/lib/org/client';
 import { Save, Upload, Copy, CalendarPlus } from 'lucide-react';
 
 export default function SettingsPage() {
@@ -18,9 +19,25 @@ export default function SettingsPage() {
 
   const [calendarUrl, setCalendarUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [org, setOrg] = useState<{ id: string; enquiry_api_key: string } | null>(null);
+  const [showKey, setShowKey] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [welcome, setWelcome] = useState(false);
+
+  const copyText = async (field: string, text: string) => {
+    await navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
 
   useEffect(() => {
     loadSettings();
+    setWelcome(new URLSearchParams(window.location.search).get('welcome') === '1');
+    supabase
+      .from('organizations')
+      .select('id, enquiry_api_key')
+      .maybeSingle()
+      .then(({ data }) => data && setOrg(data));
     fetch('/api/calendar/link')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d?.url && setCalendarUrl(d.url))
@@ -66,16 +83,22 @@ export default function SettingsPage() {
     const file = e.target.files?.[0];
     if (!file || !settings) return;
 
-    const ext = file.name.split('.').pop();
-    const path = `logo-${Date.now()}.${ext}`;
+    const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
+    let path: string;
+    try {
+      path = `${await orgFolder(supabase)}/logo-${Date.now()}.${ext}`;
+    } catch (err) {
+      setMessage('Error uploading logo: ' + (err instanceof Error ? err.message : String(err)));
+      return;
+    }
 
-    const { error } = await supabase.storage.from('logos').upload(path, file);
+    const { error } = await supabase.storage.from('Logos').upload(path, file);
     if (error) {
       setMessage('Error uploading logo: ' + error.message);
       return;
     }
 
-    const { data: { publicUrl } } = supabase.storage.from('logos').getPublicUrl(path);
+    const { data: { publicUrl } } = supabase.storage.from('Logos').getPublicUrl(path);
     setSettings({ ...settings, logo_url: publicUrl });
   };
 
@@ -103,6 +126,13 @@ export default function SettingsPage() {
           }`}
         >
           {message}
+        </div>
+      )}
+
+      {welcome && (
+        <div className="p-4 rounded-md text-sm bg-green-50 text-green-800">
+          Your business is set up. Add your contact details, logo, bank details and terms below, then press Save
+          Settings. These go on every quote and invoice you send.
         </div>
       )}
 
@@ -291,6 +321,45 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Website connection */}
+      {org && (
+        <Card>
+          <CardHeader>
+            <h3 className="text-lg font-bold" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
+              Connect Your Website
+            </h3>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-[var(--color-text-muted)]">
+              Your website can send enquiries straight into the app. Each one creates a customer and a draft invoice,
+              and you get an email. Give these details to whoever looks after your website. Keep the secret key private.
+            </p>
+            {[
+              { field: 'endpoint', label: 'Enquiry address (POST)', value: `${window.location.origin}/api/enquiry`, secret: false },
+              { field: 'key', label: 'Secret key (send it in the x-api-secret header)', value: org.enquiry_api_key, secret: true },
+              { field: 'products', label: 'Your product list (for showing products on your website)', value: `${window.location.origin}/api/products?business=${org.id}`, secret: false },
+            ].map((row) => (
+              <div key={row.field}>
+                <p className="text-xs font-medium text-[var(--color-text-muted)] mb-1">{row.label}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <code className="flex-1 min-w-0 truncate rounded bg-[var(--color-bg-light)] px-2 py-1.5 text-xs">
+                    {row.secret && !showKey ? '•'.repeat(24) : row.value}
+                  </code>
+                  {row.secret && (
+                    <Button variant="outline" size="sm" onClick={() => setShowKey((v) => !v)}>
+                      {showKey ? 'Hide' : 'Show'}
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => copyText(row.field, row.value)}>
+                    <Copy className="w-3.5 h-3.5" /> {copiedField === row.field ? 'Copied' : 'Copy'}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Save Button */}
       <div className="flex justify-end pb-8">

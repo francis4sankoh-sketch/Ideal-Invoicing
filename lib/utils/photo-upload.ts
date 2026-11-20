@@ -2,11 +2,13 @@
  * Shared helpers for uploading line-item photos to the `quotes` storage
  * bucket, with HEIC → JPEG conversion and client-side resize.
  *
- * Photos are stored at: `quotes/line-items/<line_item_id>/<random>.jpg`
- * so cleanup can be done by line-item-id (no need to know the parent quote).
+ * Photos are stored at: `quotes/<business_id>/line-items/<line_item_id>/<random>.jpg`
+ * so cleanup can be done by line-item-id (no need to know the parent quote). Photos from
+ * before businesses were separated have no business folder.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { orgFolder } from '@/lib/org/client';
 
 const BUCKET = 'quotes';
 const PREFIX = 'line-items';
@@ -118,7 +120,7 @@ export async function uploadLineItemPhoto(
 
   const converted = await convertHeicIfNeeded(file);
   const resized = await resizeImage(converted);
-  const path = `${PREFIX}/${lineItemId}/${randomFileName()}`;
+  const path = `${await orgFolder(supabase)}/${PREFIX}/${lineItemId}/${randomFileName()}`;
 
   const { error } = await supabase.storage
     .from(BUCKET)
@@ -144,7 +146,7 @@ export async function uploadProductPhoto(
 
   const converted = await convertHeicIfNeeded(file);
   const resized = await resizeImage(converted);
-  const path = `product-uploads/${randomFileName()}`;
+  const path = `${await orgFolder(supabase)}/product-uploads/${randomFileName()}`;
 
   const { error } = await supabase.storage
     .from('Products')

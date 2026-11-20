@@ -3,14 +3,22 @@ import { timingSafeEqual } from 'crypto';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { buildIcs, type FeedEvent } from '@/lib/calendar/ics';
 import { formatCurrency } from '@/lib/utils/format';
+import { findOrgBySecret, getDefaultOrg, type Organization } from '@/lib/org/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 // Public (calendar apps can't log in), so the secret key in the URL is the only credential.
-function keyMatches(given: string): boolean {
+// Each business has its own key; the original business's old key (CALENDAR_FEED_KEY) still works.
+function legacyKeyMatches(given: string): boolean {
   const expected = process.env.CALENDAR_FEED_KEY;
   if (!expected) return false;
   const a = Buffer.from(given);
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
+}
+
+async function orgForKey(supabase: SupabaseClient, key: string): Promise<Organization | null> {
+  if (legacyKeyMatches(key)) return getDefaultOrg(supabase);
+  return findOrgBySecret(supabase, 'calendar_feed_key', key);
 }
 
 type Customer = { contact_name: string; phone: string | null; email: string | null } | null;
@@ -50,18 +58,20 @@ const joinLines = (lines: (string | null)[]) => lines.filter((l): l is string =>
 // an invoice are included as they are.
 export async function GET(request: NextRequest, ctx: { params: Promise<{ key: string }> }) {
   const { key } = await ctx.params;
-  if (!keyMatches(key.replace(/\.ics$/, ''))) {
+  const supabase = await createServiceRoleClient();
+  const org = await orgForKey(supabase, key.replace(/\.ics$/, ''));
+  if (!org) {
     return new Response('Not found', { status: 404 });
   }
 
   const sinceDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString();
-  const supabase = await createServiceRoleClient();
-  const [invRes, apptRes] = await Promise.all([
+  const [invRes, apptRes, settingsRes] = await Promise.all([
     supabase
       .from('invoices')
       .select(
         'id, invoice_number, title, status, event_date, event_location, total, deposit_amount, amount_paid, balance_due, updated_at, customer:customers(contact_name, phone, email), appointments(id, start_time, end_time, location, status)'
       )
+      .eq('organization_id', org.id)
       .not('status', 'in', '(draft,cancelled)')
       .not('event_date', 'is', null)
       .gte('event_date', sinceDate.slice(0, 10))
@@ -69,9 +79,11 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ key: st
     supabase
       .from('appointments')
       .select('id, title, start_time, end_time, location, status, notes, updated_at, customer:customers(contact_name, phone, email)')
+      .eq('organization_id', org.id)
       .is('invoice_id', null)
       .neq('status', 'cancelled')
       .gte('end_time', sinceDate),
+    supabase.from('business_settings').select('business_name').eq('organization_id', org.id).maybeSingle(),
   ]);
   if (invRes.error || apptRes.error) {
     console.error('Calendar feed query failed:', invRes.error?.message || apptRes.error?.message);
@@ -117,10 +129,12 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ key: st
     });
   }
 
-  return new Response(buildIcs('Ideal Events Hire', events), {
+  const calendarName = settingsRes.data?.business_name || org.name;
+  const fileName = calendarName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'bookings';
+  return new Response(buildIcs(calendarName, events), {
     headers: {
       'Content-Type': 'text/calendar; charset=utf-8',
-      'Content-Disposition': 'inline; filename="ideal-events-hire.ics"',
+      'Content-Disposition': `inline; filename="${fileName}.ics"`,
       'Cache-Control': 'no-store',
     },
   });

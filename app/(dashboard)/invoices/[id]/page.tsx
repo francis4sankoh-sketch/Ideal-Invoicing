@@ -742,7 +742,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
 
   const openSendUpdated = () => {
     if (!invoice) return;
-    setEmailSubject(`Updated invoice ${invoice.invoice_number} from Ideal Events Hire`);
+    setEmailSubject(`Updated invoice ${invoice.invoice_number} from ${settings?.business_name || 'us'}`);
     setEmailBody('');
     setSendModalOpen(true);
   };
@@ -1026,7 +1026,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               <Button
                 size="sm"
                 onClick={() => {
-                  setEmailSubject(`Invoice ${invoice.invoice_number} from Ideal Events Hire`);
+                  setEmailSubject(`Invoice ${invoice.invoice_number} from ${settings?.business_name || 'us'}`);
                   setSendModalOpen(true);
                 }}
               >
@@ -1381,7 +1381,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                 <Bell className="w-3.5 h-3.5" /> Send Reminder
               </Button>
               <Button variant="outline" size="sm" onClick={() => {
-                setEmailSubject(`Invoice ${invoice.invoice_number} from Ideal Events Hire`);
+                setEmailSubject(`Invoice ${invoice.invoice_number} from ${settings?.business_name || 'us'}`);
                 setEmailBody('');
                 setSendModalOpen(true);
               }}>
@@ -1424,7 +1424,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             <div>
               {settings?.logo_url && <img src={settings.logo_url} alt="Logo" className="h-12 mb-2" />}
               <h3 className="text-lg font-bold text-[var(--color-primary)]" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
-                {settings?.business_name || 'Ideal Events Hire'}
+                {settings?.business_name}
               </h3>
               <p className="text-xs text-[var(--color-text-muted)]">
                 {settings?.abn && `ABN: ${settings.abn}`}<br />

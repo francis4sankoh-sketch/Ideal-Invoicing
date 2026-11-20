@@ -1,10 +1,11 @@
 import type { MetadataRoute } from 'next';
+import { APP_NAME } from '@/lib/app-config';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Ideal Invoicing',
-    short_name: 'Ideal',
-    description: 'Invoices, bookings and enquiries for Ideal Events Hire',
+    name: APP_NAME,
+    short_name: APP_NAME.split(' ')[0],
+    description: 'Quotes, invoices, bookings and enquiries for event hire businesses',
     start_url: '/',
     scope: '/',
     display: 'standalone',

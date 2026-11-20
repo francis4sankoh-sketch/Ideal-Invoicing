@@ -6,6 +6,7 @@ import { Customer, Quote, Invoice, QuoteMessage, BusinessSettings } from '@/type
 
 type PortalCustomer = Pick<Customer, 'id' | 'contact_name' | 'business_name' | 'email'>;
 import { formatCurrency, formatDateDocument } from '@/lib/utils/format';
+import { brandPalette } from '@/lib/utils/brand-colors';
 import { Badge } from '@/components/ui/badge';
 import { Check, X, MessageCircle, FileText, Receipt, Send, Download } from 'lucide-react';
 
@@ -47,6 +48,15 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
   };
 
   useEffect(() => { loadPortal(); }, [token]);
+
+  // The page uses the business's own colour (--brand, --brand-pale, --brand-dark).
+  useEffect(() => {
+    const { base, pale, dark } = brandPalette(settings?.brand_color);
+    const root = document.documentElement.style;
+    root.setProperty('--brand', base);
+    root.setProperty('--brand-pale', pale);
+    root.setProperty('--brand-dark', dark);
+  }, [settings?.brand_color]);
 
   const loadPortal = async () => {
     try {
@@ -193,7 +203,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
             <div
               key={m.id}
               className={`p-3 rounded-lg text-sm max-w-[80%] ${
-                m.sender_type === 'customer' ? 'ml-auto bg-[#800020] text-white' : 'bg-gray-100 text-gray-800'
+                m.sender_type === 'customer' ? 'ml-auto bg-[var(--brand)] text-white' : 'bg-gray-100 text-gray-800'
               }`}
             >
               <p className="text-xs opacity-70 mb-1">{m.sender_name || m.sender_type}</p>
@@ -207,13 +217,13 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
           value={messageText}
           onChange={(e) => setMessageText(e.target.value)}
           placeholder="Type a message..."
-          className="flex-1 px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[#800020]"
+          className="flex-1 px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[var(--brand)]"
           onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
         />
         <button
           onClick={handleSendMessage}
           disabled={busy}
-          className="px-4 py-2 bg-[#800020] text-white rounded-md text-sm hover:bg-[#4a0012] transition-colors flex items-center gap-1 disabled:opacity-60"
+          className="px-4 py-2 bg-[var(--brand)] text-white rounded-md text-sm hover:bg-[var(--brand-dark)] transition-colors flex items-center gap-1 disabled:opacity-60"
         >
           <Send className="w-4 h-4" /> Send
         </button>
@@ -223,17 +233,17 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#fdf0ef] flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#800020]" />
+      <div className="min-h-screen bg-[var(--brand-pale)] flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--brand)]" />
       </div>
     );
   }
 
   if (!customer) {
     return (
-      <div className="min-h-screen bg-[#fdf0ef] flex items-center justify-center">
+      <div className="min-h-screen bg-[var(--brand-pale)] flex items-center justify-center">
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-[#800020]" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
+          <h1 className="text-2xl font-bold text-[var(--brand)]" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
             Invalid Link
           </h1>
           <p className="text-sm text-gray-500 mt-2">This portal link is not valid or has expired.</p>
@@ -243,13 +253,12 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
   }
 
   return (
-    <div className="min-h-screen bg-[#fdf0ef]">
+    <div className="min-h-screen bg-[var(--brand-pale)]">
       {/* Portal Header */}
-      <header className="bg-[#800020] text-white px-6 py-4">
+      <header className="bg-[var(--brand)] text-white px-6 py-4">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>Ideal</h1>
-            <p className="text-[10px] tracking-[0.25em] uppercase text-white/70">Events Hire</p>
+            <h1 className="text-xl font-bold" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>{settings?.business_name}</h1>
           </div>
           {view !== 'home' && (
             <button onClick={() => setView('home')} className="text-sm text-white/80 hover:text-white">
@@ -262,7 +271,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
       <main className="max-w-4xl mx-auto px-4 py-8">
         {view === 'home' && (
           <>
-            <h2 className="text-2xl font-bold text-[#800020] mb-6" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
+            <h2 className="text-2xl font-bold text-[var(--brand)] mb-6" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
               Welcome, {customer.contact_name}
             </h2>
 
@@ -278,7 +287,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
                       className="w-full bg-white rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow text-left flex items-center justify-between"
                     >
                       <div className="flex items-center gap-3">
-                        <FileText className="w-5 h-5 text-[#800020]" />
+                        <FileText className="w-5 h-5 text-[var(--brand)]" />
                         <div>
                           <p className="text-sm font-medium">{q.quote_number} — {q.title}</p>
                           <p className="text-xs text-gray-500">{q.event_date ? formatDateDocument(q.event_date) : 'No date set'}</p>
@@ -306,7 +315,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
                       className="w-full bg-white rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow text-left flex items-center justify-between"
                     >
                       <div className="flex items-center gap-3">
-                        <Receipt className="w-5 h-5 text-[#800020]" />
+                        <Receipt className="w-5 h-5 text-[var(--brand)]" />
                         <div>
                           <p className="text-sm font-medium">{inv.invoice_number} — {inv.title}</p>
                           <p className="text-xs text-gray-500">Due: {inv.due_date ? formatDateDocument(inv.due_date) : 'N/A'}</p>
@@ -340,8 +349,8 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
               <div className="flex justify-between items-start mb-6">
                 <div>
                   {settings?.logo_url && <img src={settings.logo_url} alt="Logo" className="h-10 mb-2" />}
-                  <h3 className="text-lg font-bold text-[#800020]" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
-                    {settings?.business_name || 'Ideal Events Hire'}
+                  <h3 className="text-lg font-bold text-[var(--brand)]" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
+                    {settings?.business_name}
                   </h3>
                   <p className="text-xs text-gray-500">
                     {settings?.abn && `ABN: ${settings.abn}`}<br />
@@ -349,7 +358,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
                   </p>
                 </div>
                 <div className="text-right">
-                  <h2 className="text-2xl font-bold text-[#800020]" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>QUOTE</h2>
+                  <h2 className="text-2xl font-bold text-[var(--brand)]" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>QUOTE</h2>
                   <p className="text-sm font-medium">{selectedQuote.quote_number}</p>
                   <Badge status={selectedQuote.status} />
                   {selectedQuote.valid_until && (
@@ -360,7 +369,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
 
               {/* Event Details */}
               {(selectedQuote.event_date || selectedQuote.event_location) && (
-                <div className="mb-4 p-3 bg-[#fdf0ef] rounded-md text-sm">
+                <div className="mb-4 p-3 bg-[var(--brand-pale)] rounded-md text-sm">
                   {selectedQuote.event_date && <p><strong>Event Date:</strong> {formatDateDocument(selectedQuote.event_date)}</p>}
                   {selectedQuote.event_location && <p><strong>Location:</strong> {selectedQuote.event_location}</p>}
                 </div>
@@ -369,7 +378,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
               {/* Line Items */}
               <table className="w-full text-sm mb-6">
                 <thead>
-                  <tr className="border-b-2 border-[#800020]">
+                  <tr className="border-b-2 border-[var(--brand)]">
                     <th className="py-2 text-left font-medium">Description</th>
                     <th className="py-2 text-center font-medium w-16">Qty</th>
                     <th className="py-2 text-right font-medium w-28">Price</th>
@@ -421,7 +430,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
                     <span>Total</span>
                     <span>{formatCurrency(selectedQuote.total)}</span>
                   </div>
-                  <div className="bg-[#800020] text-white p-3 rounded-md flex justify-between font-bold">
+                  <div className="bg-[var(--brand)] text-white p-3 rounded-md flex justify-between font-bold">
                     <span>Deposit Required ({selectedQuote.deposit_percentage}%)</span>
                     <span>{formatCurrency(selectedQuote.deposit_amount)}</span>
                   </div>
@@ -484,7 +493,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
                     onChange={(e) => setRejectReason(e.target.value)}
                     placeholder="Reason for rejection..."
                     rows={3}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[#800020] mb-4"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[var(--brand)] mb-4"
                   />
                   <div className="flex gap-3 justify-end">
                     <button onClick={() => setShowRejectModal(false)} className="px-4 py-2 border border-gray-200 rounded-md text-sm">Cancel</button>
@@ -502,13 +511,13 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
             <div className="flex justify-between items-start mb-6">
               <div>
                 {settings?.logo_url && <img src={settings.logo_url} alt="Logo" className="h-10 mb-2" />}
-                <h3 className="text-lg font-bold text-[#800020]" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
-                  {settings?.business_name || 'Ideal Events Hire'}
+                <h3 className="text-lg font-bold text-[var(--brand)]" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
+                  {settings?.business_name}
                 </h3>
                 <p className="text-xs text-gray-500">{settings?.abn && `ABN: ${settings.abn}`}</p>
               </div>
               <div className="text-right">
-                <h2 className="text-2xl font-bold text-[#800020]" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>INVOICE</h2>
+                <h2 className="text-2xl font-bold text-[var(--brand)]" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>INVOICE</h2>
                 <p className="text-sm font-medium">{selectedInvoice.invoice_number}</p>
                 <Badge status={selectedInvoice.status} />
                 <p className="text-xs text-gray-500 mt-1">
@@ -519,7 +528,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
                   <button
                     onClick={handleDownloadInvoice}
                     disabled={downloading}
-                    className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 border border-[#800020] text-[#800020] rounded-md text-xs font-medium hover:bg-[#fdf0ef] transition-colors disabled:opacity-60"
+                    className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 border border-[var(--brand)] text-[var(--brand)] rounded-md text-xs font-medium hover:bg-[var(--brand-pale)] transition-colors disabled:opacity-60"
                   >
                     <Download className="w-3.5 h-3.5" /> {downloading ? 'Preparing PDF…' : 'Download PDF'}
                   </button>
@@ -529,7 +538,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
 
             <table className="w-full text-sm mb-6">
               <thead>
-                <tr className="border-b-2 border-[#800020]">
+                <tr className="border-b-2 border-[var(--brand)]">
                   <th className="py-2 text-left font-medium">Description</th>
                   <th className="py-2 text-center font-medium w-16">Qty</th>
                   <th className="py-2 text-right font-medium w-28">Price</th>
@@ -569,7 +578,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
                 <div className="flex justify-between text-sm text-green-600">
                   <span>Amount Paid</span><span>{formatCurrency(selectedInvoice.amount_paid)}</span>
                 </div>
-                <div className="bg-[#800020] text-white p-3 rounded-md flex justify-between font-bold text-lg">
+                <div className="bg-[var(--brand)] text-white p-3 rounded-md flex justify-between font-bold text-lg">
                   <span>Balance Due</span><span>{formatCurrency(selectedInvoice.balance_due)}</span>
                 </div>
               </div>
@@ -577,7 +586,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
 
             {/* Payment Details */}
             {settings && (settings.bsb || settings.account_number) && (
-              <div className="mt-8 p-4 bg-[#fdf0ef] rounded-md">
+              <div className="mt-8 p-4 bg-[var(--brand-pale)] rounded-md">
                 <h4 className="text-sm font-bold mb-2">Payment Details</h4>
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   {settings.bank_name && <><span className="text-gray-500">Bank:</span><span>{settings.bank_name}</span></>}
@@ -614,7 +623,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
 
             {selectedInvoice.terms?.trim() && (
               <details className="mt-6 border border-gray-200 rounded-md group" open={!selectedInvoice.terms_accepted_at}>
-                <summary className="cursor-pointer select-none px-4 py-3 text-sm font-bold text-[#800020] flex items-center justify-between">
+                <summary className="cursor-pointer select-none px-4 py-3 text-sm font-bold text-[var(--brand)] flex items-center justify-between">
                   Terms and Conditions
                   <span className="text-xs font-normal text-gray-500 group-open:hidden">Show</span>
                   <span className="text-xs font-normal text-gray-500 hidden group-open:inline">Hide</span>
@@ -640,7 +649,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
             </div>
           ) : selectedInvoice.status !== 'cancelled' && selectedInvoice.terms?.trim() ? (
             <div className="bg-white rounded-lg shadow-sm p-6">
-              <h3 className="font-bold text-[#800020] mb-1" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
+              <h3 className="font-bold text-[var(--brand)] mb-1" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
                 Confirm your booking
               </h3>
               <p className="text-sm text-gray-500 mb-4">Please read the Terms and Conditions above, then accept this invoice.</p>
@@ -649,7 +658,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
                   type="checkbox"
                   checked={agreed}
                   onChange={(e) => setAgreed(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 accent-[#800020]"
+                  className="mt-0.5 w-4 h-4 accent-[var(--brand)]"
                 />
                 <span>I have read and agree to the Terms and Conditions of hire.</span>
               </label>
@@ -659,7 +668,7 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
                 value={acceptName}
                 onChange={(e) => setAcceptName(e.target.value)}
                 autoComplete="name"
-                className="w-full sm:w-80 px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[#800020] mb-4"
+                className="w-full sm:w-80 px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[var(--brand)] mb-4"
               />
               <div>
                 <button
@@ -680,7 +689,11 @@ export default function PortalPage({ params }: { params: Promise<{ token: string
 
       {/* Footer */}
       <footer className="text-center py-6 text-xs text-gray-400">
-        <p>Ideal Events Hire &middot; Melbourne, Victoria &middot; idealeventshire.com.au</p>
+        <p>
+          {[settings?.business_name, [settings?.city, settings?.state].filter(Boolean).join(', '), settings?.website?.replace(/^https?:\/\//, '').replace(/\/$/, '')]
+            .filter(Boolean)
+            .join(' · ')}
+        </p>
       </footer>
     </div>
   );

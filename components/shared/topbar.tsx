@@ -1,5 +1,7 @@
 'use client';
 
+import { APP_NAME } from '@/lib/app-config';
+
 import { usePathname } from 'next/navigation';
 import { Menu, Moon, Sun } from 'lucide-react';
 import { useTheme } from '@/components/shared/theme-provider';
@@ -31,7 +33,7 @@ export function Topbar({ onMenuClick }: TopbarProps) {
       if (path === '/' && pathname === '/') return title;
       if (path !== '/' && pathname.startsWith(path)) return title;
     }
-    return 'Ideal Invoicing';
+    return APP_NAME;
   };
 
   return (

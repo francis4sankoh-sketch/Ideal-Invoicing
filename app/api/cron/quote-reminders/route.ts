@@ -3,13 +3,13 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 import { sendQuoteReminder } from '@/lib/resend/emails';
 import { formatDateAU } from '@/lib/utils/format';
 import { isCronRequest } from '@/lib/utils/cron';
+import { loadBrand, type Brand } from '@/lib/org/server';
+import { APP_URL } from '@/lib/app-config';
 
 // Nudge config
 const DAYS_BETWEEN = 3; // wait this many days after send / last nudge
 const MAX_REMINDERS = 2; // stop after this many nudges
 const MAX_AGE_DAYS = 30; // never chase a quote sent longer ago than this
-
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://ideal-invoicing-delta.vercel.app';
 
 /**
  * Daily cron: email a gentle reminder for quotes that were sent but not yet
@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   // Candidate quotes: status 'sent', under the reminder cap, sent long enough ago
   const { data: quotes, error } = await supabase
     .from('quotes')
-    .select('id, quote_number, title, total, valid_until, sent_at, reminder_count, last_reminder_sent, last_viewed, customer:customers(contact_name, email, portal_token)')
+    .select('id, organization_id, quote_number, title, total, valid_until, sent_at, reminder_count, last_reminder_sent, last_viewed, customer:customers(contact_name, email, portal_token)')
     .eq('status', 'sent')
     .lt('reminder_count', MAX_REMINDERS);
 
@@ -38,6 +38,12 @@ export async function GET(request: NextRequest) {
   }
 
   const results: Array<{ quote: string; sent: boolean; reason?: string }> = [];
+  // Each quote's reminder goes out under its own business's name.
+  const brands = new Map<string, Promise<Brand>>();
+  const brandFor = (orgId: string) => {
+    if (!brands.has(orgId)) brands.set(orgId, loadBrand(supabase, orgId));
+    return brands.get(orgId)!;
+  };
 
   for (const q of quotes || []) {
     const customer = Array.isArray(q.customer) ? q.customer[0] : q.customer;
@@ -73,7 +79,7 @@ export async function GET(request: NextRequest) {
 
     const portalUrl = `${APP_URL}/portal/${customer.portal_token}?quote=${q.id}`;
     try {
-      await sendQuoteReminder({
+      await sendQuoteReminder(await brandFor(q.organization_id), {
         customerEmail: customer.email,
         customerName: customer.contact_name || 'there',
         quoteNumber: q.quote_number,

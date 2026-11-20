@@ -1,11 +1,12 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/shared/theme-provider";
+import { APP_NAME } from "@/lib/app-config";
 
 export const metadata: Metadata = {
-  title: "Ideal Invoicing",
-  description: "Business management for Ideal Events Hire",
-  appleWebApp: { capable: true, title: "Ideal", statusBarStyle: "default" },
+  title: APP_NAME,
+  description: "Quotes, invoices, bookings and enquiries for event hire businesses",
+  appleWebApp: { capable: true, title: APP_NAME.split(" ")[0], statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {

@@ -2,9 +2,11 @@ import { NextRequest } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { sendTelegram } from '@/lib/notify/telegram';
 import { parseThreadRef, postBusinessReply } from '@/lib/messages/thread';
+import { getDefaultOrg } from '@/lib/org/server';
 
 // Telegram calls this for every message sent to the bot. It's public, so it only trusts
 // requests carrying the secret registered with setWebhook, and only messages from the owner's chat.
+// The Telegram bot belongs to the original business (Ideal), so replies only reach its threads.
 export async function POST(request: NextRequest) {
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
   if (!secret || request.headers.get('x-telegram-bot-api-secret-token') !== secret) {
@@ -28,7 +30,10 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = await createServiceRoleClient();
-    const result = await postBusinessReply(supabase, ref.kind, ref.id, msg.text);
+    const org = await getDefaultOrg(supabase);
+    const result = org
+      ? await postBusinessReply(supabase, org.id, ref.kind, ref.id, msg.text)
+      : ({ ok: false, error: 'No business is set up' } as const);
     await sendTelegram(
       result.ok
         ? `Sent to ${result.customerName} on ${result.label}${result.emailed ? ', and emailed them.' : ". It's in their portal, but the email to them failed."}`

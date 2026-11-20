@@ -1,22 +1,24 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendReplyToCustomer } from '@/lib/resend/emails';
+import { loadBrand } from '@/lib/org/server';
+import { APP_URL } from '@/lib/app-config';
 
 // A message thread belongs to either a quote or an invoice (quote_messages.quote_id / invoice_id).
 export type ThreadKind = 'quote' | 'invoice';
-
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://ideal-invoicing-delta.vercel.app';
 
 export function threadColumn(kind: ThreadKind) {
   return kind === 'quote' ? 'quote_id' : 'invoice_id';
 }
 
-export async function loadThreadDoc(supabase: SupabaseClient, kind: ThreadKind, id: string) {
+// Only finds the document inside the given business, so one business can't reach another's threads.
+export async function loadThreadDoc(supabase: SupabaseClient, orgId: string, kind: ThreadKind, id: string) {
   const table = kind === 'quote' ? 'quotes' : 'invoices';
   const numberField = kind === 'quote' ? 'quote_number' : 'invoice_number';
   const { data } = await supabase
     .from(table)
     .select(`id, ${numberField}, customer:customers(contact_name, email, portal_token)`)
     .eq('id', id)
+    .eq('organization_id', orgId)
     .maybeSingle();
   if (!data) return null;
   const row = data as unknown as Record<string, unknown> & {
@@ -32,6 +34,7 @@ export async function loadThreadDoc(supabase: SupabaseClient, kind: ThreadKind, 
 
 export async function postBusinessReply(
   supabase: SupabaseClient,
+  orgId: string,
   kind: ThreadKind,
   id: string,
   message: string
@@ -39,13 +42,15 @@ export async function postBusinessReply(
   const text = message.trim().slice(0, 5000);
   if (!text) return { ok: false, error: 'The reply is empty' };
 
-  const doc = await loadThreadDoc(supabase, kind, id);
+  const doc = await loadThreadDoc(supabase, orgId, kind, id);
   if (!doc || !doc.customer) return { ok: false, error: `That ${kind} no longer exists` };
 
+  const brand = await loadBrand(supabase, orgId);
   const { error } = await supabase.from('quote_messages').insert({
+    organization_id: orgId,
     [threadColumn(kind)]: id,
     sender_type: 'business',
-    sender_name: 'Ideal Events Hire',
+    sender_name: brand.name,
     message: text,
     read: true,
   });
@@ -53,7 +58,7 @@ export async function postBusinessReply(
 
   let emailed = false;
   try {
-    await sendReplyToCustomer({
+    await sendReplyToCustomer(brand, {
       customerEmail: doc.customer.email,
       customerName: doc.customer.contact_name,
       documentLabel: doc.label,

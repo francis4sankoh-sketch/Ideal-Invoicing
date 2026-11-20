@@ -1,6 +1,11 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+// Pages for people who aren't signed in yet.
+function isSignedOutPage(pathname: string) {
+  return pathname.startsWith('/login') || pathname.startsWith('/signup') || pathname.startsWith('/auth/');
+}
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
@@ -10,7 +15,7 @@ export async function updateSession(request: NextRequest) {
   // Skip auth check if Supabase isn't configured
   if (!url || !key) {
     const { pathname } = request.nextUrl;
-    if (!pathname.startsWith('/login') && !pathname.startsWith('/portal') && !pathname.startsWith('/api/')) {
+    if (!isSignedOutPage(pathname) && !pathname.startsWith('/portal') && !pathname.startsWith('/api/')) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = '/login';
       return NextResponse.redirect(redirectUrl);
@@ -62,14 +67,14 @@ export async function updateSession(request: NextRequest) {
   }
 
   // Redirect to login if not authenticated
-  if (!user && !pathname.startsWith('/login')) {
+  if (!user && !isSignedOutPage(pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
 
-  // Redirect to dashboard if already logged in and on login page
-  if (user && pathname === '/login') {
+  // Redirect to dashboard if already logged in and on the login or sign-up page
+  if (user && (pathname === '/login' || pathname === '/signup')) {
     const url = request.nextUrl.clone();
     url.pathname = '/';
     return NextResponse.redirect(url);

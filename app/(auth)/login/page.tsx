@@ -1,16 +1,28 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
+import { AuthCard, Field, authButtonClass, authInputClass } from '@/components/shared/auth-card';
 
+// useSearchParams needs a Suspense boundary so the page can still be built ahead of time.
 export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const confirmFailed = useSearchParams().get('confirm') === 'failed';
   const supabase = createClient();
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -33,75 +45,53 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg-light)]">
-      <div className="w-full max-w-md">
-        <div className="bg-white rounded-xl shadow-lg p-8">
-          {/* Logo */}
-          <div className="text-center mb-8">
-            <h1
-              className="text-3xl font-bold text-[var(--color-primary)]"
-              style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}
-            >
-              Ideal
-            </h1>
-            <p
-              className="text-xs tracking-[0.3em] uppercase text-[var(--color-text-muted)] mt-1"
-              style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
-            >
-              Invoicing
-            </p>
-          </div>
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-[var(--color-text)] mb-1">
-                Email
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-2 border border-[var(--color-border)] rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-transparent"
-                placeholder="you@example.com"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-[var(--color-text)] mb-1">
-                Password
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-[var(--color-border)] rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-transparent"
-                placeholder="Enter your password"
-                required
-              />
-            </div>
-
-            {error && (
-              <div className="bg-red-50 text-red-700 text-sm p-3 rounded-md">
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-2.5 bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] text-white text-sm font-medium rounded-md transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-              {loading ? 'Signing in...' : 'Sign In'}
-            </button>
-          </form>
+    <AuthCard
+      footer={
+        <>
+          New here?{' '}
+          <Link href="/signup" className="font-medium text-[var(--color-primary)] hover:underline">
+            Create an account
+          </Link>
+        </>
+      }
+    >
+      {confirmFailed && (
+        <div className="bg-amber-50 text-amber-800 text-sm p-3 rounded-md mb-4">
+          That confirmation link didn&apos;t work or has expired. Try signing in, or sign up again to get a new link.
         </div>
+      )}
+      <form onSubmit={handleLogin} className="space-y-4">
+        <Field label="Email">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className={authInputClass}
+            placeholder="you@example.com"
+            autoComplete="email"
+            required
+          />
+        </Field>
 
-        <p className="text-center text-xs text-[var(--color-text-muted)] mt-6">
-          Ideal Events Hire &middot; Melbourne, VIC
-        </p>
-      </div>
-    </div>
+        <Field label="Password">
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className={authInputClass}
+            placeholder="Enter your password"
+            autoComplete="current-password"
+            required
+          />
+        </Field>
+
+        {error && <div className="bg-red-50 text-red-700 text-sm p-3 rounded-md">{error}</div>}
+
+        <button type="submit" disabled={loading} className={authButtonClass}>
+          {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+          {loading ? 'Signing in...' : 'Sign In'}
+        </button>
+      </form>
+    </AuthCard>
   );
 }

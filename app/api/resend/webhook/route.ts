@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import { Resend } from 'resend';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { sendTelegram } from '@/lib/notify/telegram';
+import { APP_URL } from '@/lib/app-config';
+import { getDefaultOrg } from '@/lib/org/server';
 
 // Resend posts delivery events here. Public, so every request must carry a valid signature.
 const STATUS: Record<string, string> = {
@@ -17,6 +19,7 @@ const PROBLEMS = new Set(['bounced', 'failed', 'complained', 'suppressed']);
 type EmailEvent = {
   type: string;
   data: {
+    from?: string;
     to?: string[];
     subject?: string;
     tags?: Record<string, string> | Array<{ name: string; value: string }>;
@@ -56,8 +59,24 @@ export async function POST(request: NextRequest) {
   const detail = event.data.bounce?.message || event.data.failed?.reason || null;
   const invoiceId = invoiceIdFrom(event.data.tags);
 
+  // Bounce alerts go to the Telegram bot, which belongs to the original business. Other
+  // businesses see the problem on the invoice itself. Emails not tied to an invoice are matched
+  // to the original business by the address they were sent from.
+  const supabase = await createServiceRoleClient();
+  let alertOwner = false;
+  if (!invoiceId && PROBLEMS.has(status)) {
+    const fromAddress = event.data.from?.match(/<([^>]+)>/)?.[1] || event.data.from || '';
+    const defaultFrom = (await getDefaultOrg(supabase))?.email_from;
+    alertOwner = !!defaultFrom && fromAddress.trim().toLowerCase() === defaultFrom.toLowerCase();
+  }
   if (invoiceId) {
-    const supabase = await createServiceRoleClient();
+    const { data: inv } = await supabase
+      .from('invoices')
+      .select('organizations(is_default)')
+      .eq('id', invoiceId)
+      .maybeSingle();
+    const org = inv?.organizations as unknown as { is_default: boolean } | null;
+    alertOwner = org?.is_default === true;
     let query = supabase
       .from('invoices')
       .update({ email_status: status, email_status_at: new Date().toISOString(), email_status_detail: detail })
@@ -68,13 +87,13 @@ export async function POST(request: NextRequest) {
     if (error) console.error('Could not update invoice email status:', error.message);
   }
 
-  if (PROBLEMS.has(status)) {
+  if (PROBLEMS.has(status) && alertOwner) {
     await sendTelegram(
       [
         `Email ${status}: ${event.data.subject || '(no subject)'}`,
         `To: ${(event.data.to || []).join(', ')}`,
         detail ? `Reason: ${detail.slice(0, 300)}` : null,
-        invoiceId ? `Check the address and resend: ${process.env.NEXT_PUBLIC_APP_URL || 'https://ideal-invoicing-delta.vercel.app'}/invoices/${invoiceId}` : null,
+        invoiceId ? `Check the address and resend: ${APP_URL}/invoices/${invoiceId}` : null,
       ]
         .filter(Boolean)
         .join('\n')

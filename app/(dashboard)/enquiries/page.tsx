@@ -106,7 +106,7 @@ export default function EnquiriesPage() {
             Website Enquiries
           </h1>
           <p className="text-sm text-[var(--color-text-muted)] mt-1">
-            Leads coming in from idealeventshire.com · {newCount} new
+            Leads coming in from your website · {newCount} new
           </p>
         </div>
       </div>
