@@ -505,6 +505,23 @@ export async function sendReplyToCustomer(
   });
 }
 
+export async function sendReviewRequest(
+  brand: Brand,
+  options: { customerEmail: string; subject: string; message: string; reviewUrl: string }
+) {
+  return sendEmail(brand, {
+    to: options.customerEmail,
+    subject: options.subject,
+    html: emailWrapper(brand, `
+      <div style="white-space: pre-wrap; font-size: 15px; line-height: 1.6;">${escapeHtml(options.message)}</div>
+      <div style="margin: 28px 0; text-align: center;">
+        <a href="${escapeHtml(options.reviewUrl)}" class="btn">Leave a Google Review</a>
+      </div>
+      ${signOff(brand)}
+    `),
+  });
+}
+
 export async function sendBackupEmail(
   brand: Brand,
   options: {

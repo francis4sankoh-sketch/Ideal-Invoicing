@@ -10,6 +10,7 @@ export interface Customer {
   postcode: string | null;
   notes: string | null;
   portal_token: string;
+  review_requested_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -236,6 +237,7 @@ export interface BusinessSettings {
   bsb: string | null;
   account_number: string | null;
   bank_reference_note: string | null;
+  google_review_url?: string | null;
   created_at: string;
   updated_at: string;
 }

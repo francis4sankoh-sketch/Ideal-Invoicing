@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Customer, Quote, Invoice } from '@/types';
 import { formatCurrency, formatDateAU } from '@/lib/utils/format';
+import { ReviewRequestButton } from '@/components/shared/review-request-button';
 import { ArrowLeft, Copy, Mail, Phone, MapPin } from 'lucide-react';
 import Link from 'next/link';
 
@@ -83,7 +84,11 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                 )}
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              <ReviewRequestButton
+                customer={customer}
+                onSent={(at) => setCustomer((c) => (c ? { ...c, review_requested_at: at } : c))}
+              />
               <Button variant="outline" size="sm" onClick={copyPortalLink}>
                 <Copy className="w-3.5 h-3.5" /> Copy Portal Link
               </Button>

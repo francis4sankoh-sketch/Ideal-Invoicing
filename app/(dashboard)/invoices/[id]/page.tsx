@@ -18,6 +18,7 @@ import { useRouter } from 'next/navigation';
 import { PDFDownloadButton } from '@/components/pdf-download-button';
 import { LineItemPhotos } from '@/components/shared/line-item-photos';
 import { ProductPicker } from '@/components/shared/product-picker';
+import { ReviewRequestButton } from '@/components/shared/review-request-button';
 import { QuickAddCustomer } from '@/components/shared/quick-add-customer';
 import { deletePhotosForLineItems } from '@/lib/utils/photo-upload';
 import { cached, TTL } from '@/lib/utils/cache';
@@ -1374,6 +1375,12 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           </Button>
           {settings && (
             <PDFDownloadButton type="invoice" data={invoice} customer={customer} settings={settings} />
+          )}
+          {customer && invoice.status !== 'cancelled' && (
+            <ReviewRequestButton
+              customer={customer}
+              onSent={(at) => setCustomer((c) => (c ? { ...c, review_requested_at: at } : c))}
+            />
           )}
           {invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
             <>

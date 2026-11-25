@@ -150,6 +150,7 @@ export default function SettingsPage() {
             <Input label="Email" type="email" value={settings.email || ''} onChange={(e) => update('email', e.target.value)} />
             <Input label="Phone" value={settings.phone || ''} onChange={(e) => update('phone', e.target.value)} />
             <Input label="Website" value={settings.website || ''} onChange={(e) => update('website', e.target.value)} />
+            <Input label="Google Review Link" type="url" value={settings.google_review_url || ''} onChange={(e) => update('google_review_url', e.target.value)} placeholder="https://g.page/r/.../review" />
             <div className="md:col-span-2">
               <Input label="Address" value={settings.address || ''} onChange={(e) => update('address', e.target.value)} />
             </div>
