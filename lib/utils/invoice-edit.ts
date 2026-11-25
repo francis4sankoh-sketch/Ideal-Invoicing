@@ -1,4 +1,5 @@
 import type { Invoice, LineItem } from '@/types';
+import { roundCents } from './money';
 
 export function recalculateTotals(
   items: LineItem[],
@@ -7,14 +8,15 @@ export function recalculateTotals(
   includeGst: boolean,
   depositPct: number
 ) {
-  const subtotal = items.reduce((s, i) => s + i.total, 0);
+  const subtotal = roundCents(items.reduce((s, i) => s + i.total, 0));
   let discountAmount = 0;
   if (discountType === 'percentage') discountAmount = subtotal * (discountValue / 100);
   else if (discountType === 'fixed') discountAmount = discountValue;
-  const afterDiscount = subtotal - discountAmount;
-  const gstAmount = includeGst ? afterDiscount * 0.1 : 0;
-  const total = afterDiscount + gstAmount;
-  const depositAmount = total * (depositPct / 100);
+  discountAmount = roundCents(discountAmount);
+  const afterDiscount = roundCents(subtotal - discountAmount);
+  const gstAmount = includeGst ? roundCents(afterDiscount * 0.1) : 0;
+  const total = roundCents(afterDiscount + gstAmount);
+  const depositAmount = roundCents(total * (depositPct / 100));
   return { subtotal, discount_amount: discountAmount, gst_amount: gstAmount, total, deposit_amount: depositAmount };
 }
 
@@ -62,7 +64,7 @@ export function settleAfterEdit(original: Invoice, newTotal: number, today: stri
   const after = stateFor(newTotal);
   const changed = before !== after;
   return {
-    balance_due: Math.max(0, newTotal - paid),
+    balance_due: Math.max(0, roundCents(newTotal - paid)),
     status: (changed ? after : original.status) as Invoice['status'],
     paid_date: changed ? (after === 'paid' ? today : null) : original.paid_date,
   };

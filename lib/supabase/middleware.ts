@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 // Pages for people who aren't signed in yet.
 function isSignedOutPage(pathname: string) {
-  return pathname.startsWith('/login') || pathname.startsWith('/signup') || pathname.startsWith('/auth/');
+  return ['/login', '/signup', '/forgot-password', '/reset-password', '/auth/'].some((p) => pathname.startsWith(p));
 }
 
 export async function updateSession(request: NextRequest) {
@@ -56,6 +56,7 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith('/api/enquiry') ||
     pathname.startsWith('/api/products') ||
     pathname.startsWith('/api/portal') ||
+    pathname === '/api/auth/forgot' ||
     pathname.startsWith('/api/telegram') ||
     pathname.startsWith('/api/calendar/feed/') ||
     // These check their own secret (Vercel Cron / Resend signature) instead of a login.

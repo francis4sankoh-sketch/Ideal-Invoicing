@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'crypto';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { buildIcs, type FeedEvent } from '@/lib/calendar/ics';
 import { formatCurrency } from '@/lib/utils/format';
+import { roundCents } from '@/lib/utils/money';
 import { findOrgBySecret, getDefaultOrg, type Organization } from '@/lib/org/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -94,7 +95,7 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ key: st
   const events: FeedEvent[] = [];
 
   for (const inv of (invRes.data || []) as unknown as InvoiceRow[]) {
-    const confirmed = inv.status === 'paid' || (inv.amount_paid > 0 && inv.amount_paid >= inv.deposit_amount);
+    const confirmed = inv.status === 'paid' || (inv.amount_paid > 0 && roundCents(inv.amount_paid) >= roundCents(inv.deposit_amount || 0));
     const appt = (inv.appointments || []).find((a) => a.status !== 'cancelled');
     const who = inv.customer?.contact_name;
     const name = `${who ? `${who}: ` : ''}${inv.title || 'Event'} (${inv.invoice_number})`;

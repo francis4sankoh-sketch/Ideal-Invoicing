@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Invoice, Customer } from '@/types';
 import { formatCurrency, formatDateAU } from '@/lib/utils/format';
+import { isOverdue } from '@/lib/utils/money';
 import { Receipt, Search, Trash2, FileSpreadsheet, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { buildXeroInvoiceCsv, downloadCsv, type InvoiceForExport } from '@/lib/utils/xero-export';
@@ -59,7 +60,9 @@ export default function InvoicesPage() {
   };
 
   const filtered = invoices.filter((inv) => {
-    if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
+    if (statusFilter === 'overdue') {
+      if (!isOverdue(inv)) return false;
+    } else if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
     if (search) {
       const s = search.toLowerCase();
       return (
@@ -164,7 +167,7 @@ export default function InvoicesPage() {
                   <tr
                     key={inv.id}
                     className={`border-b border-[var(--color-border)] hover:bg-[var(--color-bg-light)] transition-colors ${
-                      inv.status === 'overdue' ? 'bg-red-50 dark:bg-red-900/10' : ''
+                      isOverdue(inv) ? 'bg-red-50 dark:bg-red-900/10' : ''
                     }`}
                   >
                     <td className="px-4 py-3">
@@ -182,6 +185,7 @@ export default function InvoicesPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <Badge status={inv.status} />
+                        {inv.status !== 'overdue' && isOverdue(inv) && <Badge status="overdue" />}
                         {['bounced', 'failed', 'complained', 'suppressed'].includes(inv.email_status || '') && (
                           <span
                             className="text-[11px] font-medium px-1.5 py-0.5 rounded-full bg-red-100 text-red-700"

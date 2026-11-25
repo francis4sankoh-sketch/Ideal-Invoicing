@@ -4,6 +4,7 @@ import { sendNewEnquiryNotification } from '@/lib/resend/emails';
 import { sendTelegram, enquiryAlertText } from '@/lib/notify/telegram';
 import { findOrgBySecret, getDefaultOrg, loadBrand, type Organization } from '@/lib/org/server';
 import { APP_URL } from '@/lib/app-config';
+import { roundCents } from '@/lib/utils/money';
 import { randomUUID, timingSafeEqual } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -250,12 +251,16 @@ export async function POST(request: NextRequest) {
 
       const { data: settings } = await supabase
         .from('business_settings')
-        .select('id, invoice_prefix, next_invoice_number, default_terms')
+        .select('default_terms')
         .eq('organization_id', orgId)
         .maybeSingle();
 
       if (settings) {
-        const invoiceNumber = `${settings.invoice_prefix}-${settings.next_invoice_number}`;
+        const { data: invoiceNumber, error: numberError } = await supabase.rpc('take_number_for_org', {
+          p_org: orgId,
+          p_kind: 'invoice',
+        });
+        if (numberError || !invoiceNumber) throw new Error(numberError?.message || 'No invoice number');
 
         const normalisedItems = normaliseItems(selected_items);
         const lineItems = normalisedItems.map((item) => {
@@ -272,10 +277,10 @@ export async function POST(request: NextRequest) {
           };
         });
 
-        const subtotal = lineItems.reduce((s, li) => s + li.total, 0);
+        const subtotal = roundCents(lineItems.reduce((s, li) => s + li.total, 0));
         const total = subtotal; // no discount, no GST by default
         const depositPct = 20;
-        const depositAmount = total * (depositPct / 100);
+        const depositAmount = roundCents(total * (depositPct / 100));
 
         const title = event_type
           ? `${event_type} — website enquiry`
@@ -330,12 +335,6 @@ export async function POST(request: NextRequest) {
 
         if (!invoiceErr && invoice) {
           draftInvoiceId = invoice.id;
-
-          // Increment the invoice number counter
-          await supabase
-            .from('business_settings')
-            .update({ next_invoice_number: settings.next_invoice_number + 1 })
-            .eq('id', settings.id);
 
           // Link the enquiry to the invoice
           await supabase

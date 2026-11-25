@@ -11,6 +11,7 @@ export interface Customer {
   notes: string | null;
   portal_token: string;
   review_requested_at?: string | null;
+  review_skipped_at?: string | null;
   created_at: string;
   updated_at: string;
 }

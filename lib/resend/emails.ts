@@ -522,6 +522,33 @@ export async function sendReviewRequest(
   });
 }
 
+// Comes from the app itself, not from a business.
+export async function sendPasswordReset(options: { to: string; from: string | null; resetUrl: string }) {
+  const brand: Brand = {
+    orgId: '',
+    isDefault: false,
+    name: APP_NAME,
+    email: null,
+    phone: null,
+    website: null,
+    location: null,
+    color: '#800020',
+    from: PLATFORM_FROM || options.from,
+  };
+  return sendEmail(brand, {
+    to: options.to,
+    subject: `Reset your ${APP_NAME} password`,
+    html: emailWrapper(brand, `
+      ${heading(brand, 'Reset your password')}
+      <p style="font-size: 15px; line-height: 1.6;">Someone asked to reset the password for your ${escapeHtml(APP_NAME)} account. If it was you, press the button to choose a new one.</p>
+      <div style="margin: 28px 0; text-align: center;">
+        <a href="${escapeHtml(options.resetUrl)}" class="btn">Set a New Password</a>
+      </div>
+      <p style="font-size: 13px; line-height: 1.6; color: #666;">The link works once and expires soon. If you didn't ask for this, ignore this email and your password stays the same.</p>
+    `),
+  });
+}
+
 export async function sendBackupEmail(
   brand: Brand,
   options: {

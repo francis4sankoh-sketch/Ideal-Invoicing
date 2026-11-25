@@ -22,6 +22,8 @@ import { ReviewRequestButton } from '@/components/shared/review-request-button';
 import { QuickAddCustomer } from '@/components/shared/quick-add-customer';
 import { deletePhotosForLineItems } from '@/lib/utils/photo-upload';
 import { cached, TTL } from '@/lib/utils/cache';
+import { depositMet as isDepositMet, isOverdue, roundCents } from '@/lib/utils/money';
+import { takeNumber } from '@/lib/utils/take-number';
 import { sendEmail } from '@/lib/utils/send-email';
 import { advanceEnquiryForInvoice } from '@/lib/utils/enquiry-status';
 import {
@@ -379,7 +381,6 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     setSaving(true);
 
     const payload = {
-      invoice_number: invoice.invoice_number,
       customer_id: invoice.customer_id,
       title: invoice.title?.trim() || 'Untitled Invoice',
       event_date: invoice.event_date || null,
@@ -401,17 +402,21 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     };
 
     if (isNew) {
-      const { data, error } = await supabase.from('invoices').insert(payload).select().single();
+      const taken = await takeNumber(supabase, 'invoice');
+      if ('error' in taken) {
+        setSaving(false);
+        alert(`Failed to save invoice: ${taken.error}`);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('invoices')
+        .insert({ ...payload, invoice_number: taken.number })
+        .select()
+        .single();
       if (error || !data) {
         setSaving(false);
         alert(`Failed to save invoice: ${error?.message || 'Unknown error'}`);
         return;
-      }
-      if (settings) {
-        await supabase
-          .from('business_settings')
-          .update({ next_invoice_number: settings.next_invoice_number + 1 })
-          .eq('id', settings.id);
       }
       router.push(`/invoices/${data.id}`);
     } else {
@@ -528,8 +533,8 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   // Recompute amount_paid / balance_due / status from a payment_history array.
   const recomputeTotals = (history: PaymentRecord[]) => {
     if (!invoice) return null;
-    const amountPaid = history.reduce((s, p) => s + p.amount, 0);
-    const balanceDue = invoice.total - amountPaid;
+    const amountPaid = roundCents(history.reduce((s, p) => s + p.amount, 0));
+    const balanceDue = roundCents(invoice.total - amountPaid);
     let status: Invoice['status'] = 'partially_paid';
     if (history.length === 0 || amountPaid === 0) status = 'unpaid';
     else if (balanceDue <= 0) status = 'paid';
@@ -549,8 +554,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
   // appointment for the event. Idempotent — won't create a second one.
   const ensureConfirmedAppointment = async (amountPaid: number) => {
     if (!invoice) return;
-    const depositMet = invoice.deposit_amount > 0 && amountPaid >= invoice.deposit_amount;
-    if (!depositMet || !invoice.event_date) return;
+    if (!isDepositMet(invoice, amountPaid) || !invoice.event_date) return;
 
     // Already have an appointment linked to this invoice?
     const { data: existing } = await supabase
@@ -1350,6 +1354,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             {invoice.invoice_number}
           </h2>
           <Badge status={invoice.status} />
+          {invoice.status !== 'overdue' && isOverdue(invoice) && <Badge status="overdue" />}
           <EmailStatus status={invoice.email_status} at={invoice.email_status_at} detail={invoice.email_status_detail} />
           {invoice.terms_accepted_at ? (
             <span
@@ -1553,7 +1558,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               <div className="flex justify-between items-center text-sm bg-[var(--color-accent-light)] p-2 rounded">
                 <span className="flex items-center gap-1.5">
                   Deposit ({invoice.deposit_percentage}%)
-                  {invoice.deposit_amount > 0 && invoice.amount_paid >= invoice.deposit_amount && (
+                  {isDepositMet(invoice) && (
                     <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-700 bg-green-100 px-1.5 py-0.5 rounded-full">
                       <CheckCircle2 className="w-3 h-3" /> Paid · Confirmed
                     </span>

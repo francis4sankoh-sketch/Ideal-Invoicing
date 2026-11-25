@@ -85,6 +85,12 @@ function LoginForm() {
           />
         </Field>
 
+        <div className="text-right -mt-2">
+          <Link href="/forgot-password" className="text-xs text-[var(--color-primary)] hover:underline">
+            Forgot password?
+          </Link>
+        </div>
+
         {error && <div className="bg-red-50 text-red-700 text-sm p-3 rounded-md">{error}</div>}
 
         <button type="submit" disabled={loading} className={authButtonClass}>

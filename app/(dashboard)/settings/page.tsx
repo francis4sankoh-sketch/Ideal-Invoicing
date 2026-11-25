@@ -12,6 +12,7 @@ import { Save, Upload, Copy, CalendarPlus } from 'lucide-react';
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<BusinessSettings | null>(null);
+  const [savedNumbers, setSavedNumbers] = useState<{ quote: number; invoice: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -55,7 +56,10 @@ export default function SettingsPage() {
 
   const loadSettings = async () => {
     const { data } = await supabase.from('business_settings').select('*').limit(1).single();
-    if (data) setSettings(data);
+    if (data) {
+      setSettings(data);
+      setSavedNumbers({ quote: data.next_quote_number, invoice: data.next_invoice_number });
+    }
     setLoading(false);
   };
 
@@ -64,11 +68,19 @@ export default function SettingsPage() {
     setSaving(true);
     setMessage('');
 
+    // Only send the next numbers if they were changed here. This page may have been open while
+    // invoices were made, and saving its old copy would wind the numbering back.
+    const { next_quote_number, next_invoice_number, ...rest } = settings;
+    const changes: Partial<BusinessSettings> = { ...rest };
+    if (next_quote_number !== savedNumbers?.quote) changes.next_quote_number = next_quote_number;
+    if (next_invoice_number !== savedNumbers?.invoice) changes.next_invoice_number = next_invoice_number;
+
     const { error } = await supabase
       .from('business_settings')
-      .update(settings)
+      .update(changes)
       .eq('id', settings.id);
 
+    if (!error) setSavedNumbers({ quote: next_quote_number, invoice: next_invoice_number });
     if (error) {
       setMessage('Error saving settings: ' + error.message);
     } else {

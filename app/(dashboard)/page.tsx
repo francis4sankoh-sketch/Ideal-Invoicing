@@ -5,7 +5,10 @@ import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { TodoList } from '@/components/shared/todo-list';
 import { formatCurrency, formatDateAU } from '@/lib/utils/format';
+import { isOverdue, todayLocal } from '@/lib/utils/money';
+import { buildTodo, type Todo, type TodoEnquiry, type TodoInvoice } from '@/lib/utils/todo';
 import {
   DollarSign,
   FileText,
@@ -62,17 +65,6 @@ interface UpcomingEvent {
   status: string;
 }
 
-interface OverdueInvoice {
-  id: string;
-  invoice_number: string;
-  title: string;
-  due_date: string;
-  balance_due: number;
-  total: number;
-  customer_name: string;
-  days_overdue: number;
-}
-
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats>({
     monthlyRevenue: 0,
@@ -89,7 +81,8 @@ export default function DashboardPage() {
   const [recentPayments, setRecentPayments] = useState<Array<{ id: string; invoice_number: string; title: string; amount_paid: number; total: number }>>([]);
   const [eventProfits, setEventProfits] = useState<EventProfit[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
-  const [overdueInvoices, setOverdueInvoices] = useState<OverdueInvoice[]>([]);
+  const [todo, setTodo] = useState<Todo | null>(null);
+  const [todoError, setTodoError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [rangePreset, setRangePreset] = useState<RangePreset>('this_month');
   const [customFrom, setCustomFrom] = useState('');
@@ -131,11 +124,11 @@ export default function DashboardPage() {
 
   const loadDashboard = async () => {
     const now = new Date();
-    const today = now.toISOString().split('T')[0];
+    const today = todayLocal(now);
     const range = getRange();
     const rangeStart = range.start;
     const rangeEnd = range.end;
-    const next30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const next30Days = todayLocal(new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000));
 
     const [
       invoicesRes,
@@ -146,20 +139,20 @@ export default function DashboardPage() {
       enquiriesRes,
       upcomingInvoicesRes,
       upcomingQuotesRes,
-      overdueRes,
+      todoInvoicesRes,
     ] = await Promise.all([
       supabase.from('invoices').select('total, amount_paid, balance_due, status, paid_date, due_date').neq('status', 'draft'),
       supabase.from('invoices').select('id, invoice_number, title, status, total, created_at').order('created_at', { ascending: false }).limit(5),
       supabase.from('invoices').select('id, invoice_number, title, amount_paid, total').gt('amount_paid', 0).order('updated_at', { ascending: false }).limit(5),
       supabase.from('expenses').select('amount, date, invoice_id'),
       supabase.from('invoices').select('id, invoice_number, title, event_date, total, amount_paid, customer:customers(contact_name)').not('event_date', 'is', null).neq('status', 'draft').order('event_date', { ascending: false }).limit(10),
-      supabase.from('website_enquiries').select('id').eq('status', 'new'),
+      supabase.from('website_enquiries').select('id, name, event_type, event_date, created_at').eq('status', 'new'),
       // Upcoming events from invoices (next 30 days) — exclude drafts, they haven't been sent yet
       supabase.from('invoices').select('id, invoice_number, title, event_date, event_location, total, balance_due, status, customer:customers(contact_name)').gte('event_date', today).lte('event_date', next30Days).neq('status', 'draft').order('event_date', { ascending: true }),
       // Upcoming events from quotes without invoices (next 30 days) — any still-open legacy quotes
       supabase.from('quotes').select('id, quote_number, title, event_date, event_location, total, status, customer:customers(contact_name)').gte('event_date', today).lte('event_date', next30Days).is('invoice_id', null).order('event_date', { ascending: true }),
-      // Overdue invoices
-      supabase.from('invoices').select('id, invoice_number, title, due_date, balance_due, total, customer:customers(contact_name)').eq('status', 'overdue').order('due_date', { ascending: true }),
+      // Everything the to-do list looks at
+      supabase.from('invoices').select('id, invoice_number, title, status, event_date, due_date, total, deposit_amount, amount_paid, balance_due, terms, terms_accepted_at, last_reminder_sent, customer:customers(id, contact_name, email, review_requested_at, review_skipped_at)').not('status', 'in', '(draft,cancelled)'),
     ]);
 
     const invoices = invoicesRes.data || [];
@@ -182,13 +175,7 @@ export default function DashboardPage() {
 
     const outstanding = invoices.filter(i => i.status === 'unpaid' || i.status === 'partially_paid' || i.status === 'overdue');
 
-    // Also check for invoices that are past due_date but not yet marked overdue
-    const overdueData = overdueRes.data || [];
-    const pastDueInvoices = invoices.filter(i =>
-      (i.status === 'unpaid' || i.status === 'partially_paid') &&
-      i.due_date && new Date(i.due_date) < now
-    );
-    const totalOverdue = [...overdueData.map(o => o.balance_due), ...pastDueInvoices.map(i => i.balance_due)];
+    const overdueList = invoices.filter((i) => isOverdue(i, today));
 
     // Upcoming events
     const upcomingInvEvents: UpcomingEvent[] = (upcomingInvoicesRes.data || []).map((inv: any) => ({
@@ -221,22 +208,6 @@ export default function DashboardPage() {
       new Date(a.event_date).getTime() - new Date(b.event_date).getTime()
     );
 
-    // Overdue invoices with days calculation
-    const overdueList: OverdueInvoice[] = (overdueRes.data || []).map((inv: any) => {
-      const dueDate = new Date(inv.due_date);
-      const daysOverdue = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
-      return {
-        id: inv.id,
-        invoice_number: inv.invoice_number,
-        title: inv.title || '',
-        due_date: inv.due_date,
-        balance_due: inv.balance_due,
-        total: inv.total,
-        customer_name: inv.customer?.contact_name || '',
-        days_overdue: daysOverdue,
-      };
-    });
-
     setStats({
       monthlyRevenue: monthRevenue,
       monthlyExpenses: monthExpenses,
@@ -267,7 +238,17 @@ export default function DashboardPage() {
     });
     setEventProfits(eventProfitData);
     setUpcomingEvents(allUpcoming);
-    setOverdueInvoices(overdueList);
+    // A failed load must not look like an empty list.
+    setTodoError(!!todoInvoicesRes.error || !!enquiriesRes.error);
+    setTodo(
+      todoInvoicesRes.error || enquiriesRes.error
+        ? null
+        : buildTodo(
+            (todoInvoicesRes.data || []) as unknown as TodoInvoice[],
+            (enquiriesRes.data || []) as TodoEnquiry[],
+            today
+          )
+    );
     setRecentInvoices(recentInvoicesRes.data || []);
     setRecentPayments(paidInvoicesRes.data || []);
     setLoading(false);
@@ -425,37 +406,11 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Overdue Invoices Alert */}
-      {overdueInvoices.length > 0 && (
-        <Card>
-          <div className="px-6 py-4 border-b border-red-200 bg-red-50 dark:bg-red-900/10 rounded-t-lg flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-red-600" />
-              <h3 className="font-bold text-red-700 dark:text-red-400" style={{ fontFamily: "'Libre Baskerville', Georgia, serif" }}>
-                Overdue Invoices ({overdueInvoices.length})
-              </h3>
-            </div>
-            <Link href="/invoices" className="text-xs text-red-600 hover:underline flex items-center gap-1">
-              View all <ArrowRight className="w-3 h-3" />
-            </Link>
-          </div>
-          <CardContent className="p-0">
-            <div className="divide-y divide-[var(--color-border)]">
-              {overdueInvoices.map((inv) => (
-                <Link key={inv.id} href={`/invoices/${inv.id}`} className="flex items-center justify-between px-6 py-3 hover:bg-[var(--color-bg-light)] transition-colors">
-                  <div>
-                    <p className="text-sm font-medium text-[var(--color-text)]">{inv.invoice_number} — {inv.title}</p>
-                    <p className="text-xs text-[var(--color-text-muted)]">{inv.customer_name}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold text-red-600">{formatCurrency(inv.balance_due)}</p>
-                    <p className="text-xs text-red-500">{inv.days_overdue} days overdue</p>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+      {todo && <TodoList todo={todo} today={todayLocal()} onChanged={loadDashboard} />}
+      {todoError && (
+        <p className="text-sm bg-red-50 text-red-700 rounded-md p-3">
+          Your to-do list didn&apos;t load. Refresh the page to try again.
+        </p>
       )}
 
       {/* Upcoming Events + Recent Activity */}

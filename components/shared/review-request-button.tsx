@@ -17,7 +17,7 @@ export function ReviewRequestButton({
   customer,
   onSent,
 }: {
-  customer: Customer;
+  customer: Pick<Customer, 'id' | 'contact_name' | 'email' | 'review_requested_at'>;
   onSent: (requestedAt: string) => void;
 }) {
   const [open, setOpen] = useState(false);

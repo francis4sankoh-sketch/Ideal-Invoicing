@@ -20,6 +20,8 @@ import { LineItemPhotos } from '@/components/shared/line-item-photos';
 import { ProductPicker } from '@/components/shared/product-picker';
 import { deletePhotosForLineItems } from '@/lib/utils/photo-upload';
 import { cached, invalidate, TTL } from '@/lib/utils/cache';
+import { roundCents } from '@/lib/utils/money';
+import { takeNumber } from '@/lib/utils/take-number';
 import { sendEmail } from '@/lib/utils/send-email';
 
 export default function QuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -189,14 +191,15 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
   };
 
   const recalculate = (items: LineItem[], discountType: string | null, discountValue: number, includeGst: boolean, depositPct: number) => {
-    const subtotal = items.reduce((s, i) => s + i.total, 0);
+    const subtotal = roundCents(items.reduce((s, i) => s + i.total, 0));
     let discountAmount = 0;
     if (discountType === 'percentage') discountAmount = subtotal * (discountValue / 100);
     else if (discountType === 'fixed') discountAmount = discountValue;
-    const afterDiscount = subtotal - discountAmount;
-    const gstAmount = includeGst ? afterDiscount * 0.1 : 0;
-    const total = afterDiscount + gstAmount;
-    const depositAmount = total * (depositPct / 100);
+    discountAmount = roundCents(discountAmount);
+    const afterDiscount = roundCents(subtotal - discountAmount);
+    const gstAmount = includeGst ? roundCents(afterDiscount * 0.1) : 0;
+    const total = roundCents(afterDiscount + gstAmount);
+    const depositAmount = roundCents(total * (depositPct / 100));
     return { subtotal, discount_amount: discountAmount, gst_amount: gstAmount, total, deposit_amount: depositAmount };
   };
 
@@ -270,7 +273,6 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
     setSaving(true);
 
     const payload = {
-      quote_number: quote.quote_number,
       customer_id: quote.customer_id,
       title: quote.title?.trim() || 'Untitled Quote',
       event_date: quote.event_date || null,
@@ -292,18 +294,21 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
     };
 
     if (isNew) {
-      const { data, error } = await supabase.from('quotes').insert(payload).select().single();
+      const taken = await takeNumber(supabase, 'quote');
+      if ('error' in taken) {
+        setSaving(false);
+        alert(`Failed to save quote: ${taken.error}`);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('quotes')
+        .insert({ ...payload, quote_number: taken.number })
+        .select()
+        .single();
       if (error || !data) {
         setSaving(false);
         alert(`Failed to save quote: ${error?.message || 'Unknown error'}`);
         return;
-      }
-      // Increment quote number
-      if (settings) {
-        await supabase
-          .from('business_settings')
-          .update({ next_quote_number: settings.next_quote_number + 1 })
-          .eq('id', settings.id);
       }
       router.push(`/quotes/${data.id}`);
     } else {
@@ -378,7 +383,12 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
     if (!quote || isNew || !settings) return;
     setSaving(true);
 
-    const quoteNumber = `${settings.quote_prefix}-${settings.next_quote_number}`;
+    const taken = await takeNumber(supabase, 'quote');
+    if ('error' in taken) {
+      setSaving(false);
+      alert(`Failed to duplicate quote: ${taken.error}`);
+      return;
+    }
     const validUntil = new Date();
     validUntil.setDate(validUntil.getDate() + (settings.default_quote_validity || 30));
 
@@ -388,7 +398,7 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
     }));
 
     const payload = {
-      quote_number: quoteNumber,
+      quote_number: taken.number,
       customer_id: quote.customer_id,
       title: `${quote.title} (Copy)`,
       event_date: quote.event_date,
@@ -423,11 +433,6 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
       return;
     }
 
-    await supabase
-      .from('business_settings')
-      .update({ next_quote_number: settings.next_quote_number + 1 })
-      .eq('id', settings.id);
-
     setSaving(false);
     if (created) router.push(`/quotes/${created.id}`);
   };
@@ -458,7 +463,12 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
     if (!quote || !settings) return;
     setSaving(true);
 
-    const invoiceNumber = `${settings.invoice_prefix}-${settings.next_invoice_number}`;
+    const taken = await takeNumber(supabase, 'invoice');
+    if ('error' in taken) {
+      setSaving(false);
+      alert(`Failed to create the invoice: ${taken.error}`);
+      return;
+    }
     // Due date defaults to the event date — the deposit/balance should be
     // settled by the time the event happens. Falls back to the standard
     // payment-terms window when there's no event date on the quote.
@@ -470,10 +480,10 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
       dueDate.setDate(dueDate.getDate() + settings.default_payment_terms);
     }
 
-    const { data: invoice } = await supabase
+    const { data: invoice, error: invoiceError } = await supabase
       .from('invoices')
       .insert({
-        invoice_number: invoiceNumber,
+        invoice_number: taken.number,
         quote_id: quote.id,
         customer_id: quote.customer_id,
         title: quote.title,
@@ -500,12 +510,9 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
         .update({ converted_to_invoice: true, invoice_id: invoice.id })
         .eq('id', quote.id);
 
-      await supabase
-        .from('business_settings')
-        .update({ next_invoice_number: settings.next_invoice_number + 1 })
-        .eq('id', settings.id);
-
       router.push(`/invoices/${invoice.id}`);
+    } else {
+      alert(`Failed to create the invoice: ${invoiceError?.message || 'Unknown error'}`);
     }
     setSaving(false);
   };
